@@ -7,10 +7,13 @@
 (hash-set! BinOpTable '* *)
 
 ;;
-(define-type ExprC (U NumC BinOp))
-(struct BinOp ([op : (U '+ '*)] [frst : ExprC] [snd : ExprC])
-  #:transparent)
+(define-type ExprC (U NumC BinOp idC-def app-def))
 (struct NumC ([n : Real]) #:transparent)
+(struct BinOp ([op : (U '+ '*)] [frst : ExprC] [snd : ExprC]) #:transparent)
+(struct idC-def ([s : symbol]) #:transparent)
+(struct app-def ([fun : symbol] [arg : ExprC]))
+
+(define-type FundefC  ([name : symbol] [arg : symbol] [body : ExprC]))
 
 ;; interpretation evaluation for VEBG language
 (define (interp [a : ExprC]) : Real
@@ -29,9 +32,17 @@
     [(list '* left right) (BinOp '* (parse left) (parse right))]
     [other (error 'parse "expected valid syntax, got ~e" other)]))
 
+;;parser for function definitions
+;;takes an s expresison and returns a FundefC
+(define (parse-fundef [func : Sexp]): FundefC
+  (match func
+    [(list 'named-fn (? symbol? name) (? symbol? arg) body) (FundefC name arg (parse body))]
+    [other (error 'parse-fundef "expected valid syntax, got ~e" other)]))
+
 ;;takes an s-expression and calles parser and interp
 (define (top-interp [expr : Sexp]) : Real (interp (parse expr)))
 
+;;---tests------------------------------------------------------------------------------------------------
 
 ;;top-interp tests
 (check-equal? (top-interp '(* (+ 1 1) 2)) 4)
