@@ -1,6 +1,12 @@
 #lang typed/racket
 (require typed/rackunit)
 
+;;make hash table for binary operations
+(define BinOpTable (make-hash))
+(hash-set! BinOpTable '+ +)
+(hash-set! BinOpTable '* *)
+
+;;
 (define-type ExprC (U NumC BinOp))
 (struct BinOp ([op : (U '+ '*)] [frst : ExprC] [snd : ExprC])
   #:transparent)
@@ -10,7 +16,8 @@
 (define (interp [a : ExprC]) : Real
   (match a
     [(NumC n) n]
-    [(BinOp o l r) (cond
+    [(BinOp o l r) (define op (hash-ref BinOpTable o));;TODO: need to figure out how to apply op correctly
+                   (cond
                      [(equal? o '+) (+ (interp l) (interp r))]
                      [(equal? o '*) (* (interp l) (interp r))])]))
 
