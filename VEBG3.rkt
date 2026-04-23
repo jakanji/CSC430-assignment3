@@ -133,6 +133,7 @@
 ;;function parse tests
 (check-equal? (parse-fundef '(double x (+ x x)))
               (FundefC 'double 'x (BinOp '+ (idC 'x) (idC 'x))))
+<<<<<<< HEAD
 #;(check-exn #rx"VEBG3-parse-fundef: expected valid syntax, got '()" (lambda () (parse-fundef '())))
 (check-equal?
  (interp (appC 'dec-if-pos (NumC 5))
@@ -149,6 +150,9 @@
                                  (idC 'x)
                                  (BinOp '- (idC 'x) (NumC 1))))))
  -2)
+=======
+(check-exn #rx"VEBG3-parse-fundef: expected valid syntax, got '()" (lambda () (parse-fundef '())))
+>>>>>>> 555862e9ba95a1ebca472b72981ff16cde625f0d
      
 ;;parse tests
 (check-equal? (parse '(double 5)) (appC 'double (NumC 5)))
