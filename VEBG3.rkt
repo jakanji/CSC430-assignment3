@@ -5,10 +5,10 @@
 (struct NumC ([n : Real]) #:transparent)
 (struct BinOp ([op : (U '+ '* '- '/)] [frst : ExprC] [snd : ExprC]) #:transparent)
 (struct idC ([s : Symbol]) #:transparent)
-(struct appC ([fun : Symbol] [arg : ExprC]) #:transparent)
+(struct appC ([fun : Symbol] [arg : (Listof ExprC)]) #:transparent)
 (struct Ifleq0C ([test : ExprC] [thn : ExprC] [els : ExprC]) #:transparent)
 
-(struct FundefC ([name : Symbol] [arg : Symbol] [body : ExprC]) #:transparent)
+(struct FundefC ([name : Symbol] [arg : (Listof Symbol)] [body : ExprC]) #:transparent)
 
 ;;binop lookup
 (define (BinopTable [op : Symbol])
@@ -39,7 +39,8 @@
     [(idC s) (cond
                [(symbol=? s for) what]
                [else in])]
-    [(appC f a) (appC f (subst what for a))]
+    [(appC f (list a)) (appC f (list (subst what for a)))]
+    [(appC f (list a ...)) (error "unimplemented multi-arg app")]
     [(BinOp s l r) (cond
                      [(equal? s '/) (BinOp '/ (subst what for l) (subst what for r))]
                      [(equal? s '+) (BinOp '+ (subst what for l) (subst what for r))]
@@ -55,9 +56,9 @@
   (match a
     [(NumC n) n]
     [(idC i) (error 'VEBG3-interp "unbound identifier error: ~e" i)]
-    [(appC fun arg) (define fd (get-fundef fun fds))
+    [(appC fun (list arg)) (define fd (get-fundef fun fds))
                     (interp (subst arg
-                                   (FundefC-arg fd)
+                                   (first (FundefC-arg fd))
                                    (FundefC-body fd)) fds)]
     [(BinOp o l r) (cond
                      [(equal? o '/) ((BinopTableDiv r) (interp l fds) (interp r fds))]
@@ -78,7 +79,7 @@
     [(list '- left right) (BinOp '- (parse left) (parse right))]
     [(list 'ifleq0? tst thn els)
      (Ifleq0C (parse tst) (parse thn) (parse els))]
-    [(list (? symbol? fun) arg) (appC fun (parse arg))] 
+    [(list (? symbol? fun) arg) (appC fun (list (parse arg)))] 
     [(? symbol? a) (idC a)]
     [other (error 'VEBG3-parse "expected valid syntax, got ~e" other)]))
 
@@ -86,7 +87,7 @@
 ;;takes an s expresison and returns a FundefC
 (define (parse-fundef [func : Sexp]): FundefC
   (match func
-    [(list (? symbol? name) (? symbol? arg) body) (FundefC name arg (parse body))]
+    [(list (? symbol? name) (? symbol? arg) body) (FundefC name (list arg) (parse body))]
     [other (error 'VEBG3-parse-fundef "expected valid syntax, got ~e" other)]))
 
 ;;takes an s expression and returns a list of FundefCs
@@ -95,27 +96,28 @@
 (define (top-interp [expr : Sexp]) : Real
   (interp
    (parse expr)
-   (list (FundefC 'a 'b (idC 'c)))))
+   (list (FundefC 'a (list 'b) (idC 'c)))))
 
 ;;---tests------------------------------------------------------------------------------------------------
 
 ;;get-fundef tests
 (check-equal? (get-fundef 'target (list
-                                   (FundefC 'a 'e (idC 'f))
-                                   (FundefC 'target 'arg (NumC 2))))
-              (FundefC 'target 'arg (NumC 2)))
+                                   (FundefC 'a '(e) (idC 'f))
+                                   (FundefC 'target '(arg) (NumC 2))))
+              (FundefC 'target '(arg) (NumC 2)))
 (check-exn #rx"VEBG-get-fundef: reference to undefined function" (lambda () (get-fundef 'a '())))
 
 ;;interp tests
-(check-equal? (interp (appC 'add (NumC 5)) (list (FundefC 'add 'x (BinOp '+ (idC 'x) (appC 'sub (NumC 1))))
-                                                 (FundefC 'sub 'z (BinOp '- (idC 'z) (appC 'mult (NumC 2))))
-                                                 (FundefC 'mult 'a (BinOp '* (idC 'a) (appC 'div (NumC 1))))
-                                                 (FundefC 'div 'y (BinOp '/ (idC 'y) (NumC 1)))))
+(check-equal? (interp (appC 'add (list (NumC 5))) (list (FundefC 'add '(x) (BinOp '+ (idC 'x) (appC 'sub (list (NumC 1)))))
+                                                 (FundefC 'sub '(z) (BinOp '- (idC 'z) (appC 'mult (list (NumC 2)))))
+                                                 (FundefC 'mult '(a) (BinOp '* (idC 'a) (appC 'div (list (NumC 1)))))
+                                                 (FundefC 'div '(y) (BinOp '/ (idC 'y) (NumC 1)))))
               4)
 (check-exn #rx"VEBG3-interp: unbound identifier error: 'y"
-           (lambda () (interp (appC 'div (NumC 5))
-                              (list (FundefC 'div 'x (BinOp '/ (idC 'y) (NumC 1)))))))
+           (lambda () (interp (appC 'div (list (NumC 5)))
+                              (list (FundefC 'div (list 'x) (BinOp '/ (idC 'y) (NumC 1)))))))
 
+;;ifleq tests
 (check-equal?
  (interp (Ifleq0C (NumC 0) (NumC 1) (NumC 2)) '())
  1)
@@ -132,19 +134,19 @@
 
 ;;function parse tests
 (check-equal? (parse-fundef '(double x (+ x x)))
-              (FundefC 'double 'x (BinOp '+ (idC 'x) (idC 'x))))
+              (FundefC 'double (list 'x) (BinOp '+ (idC 'x) (idC 'x))))
 (check-exn #rx"VEBG3-parse-fundef: expected valid syntax, got '()" (lambda () (parse-fundef '())))
 (check-equal?
- (interp (appC 'dec-if-pos (NumC 5))
-         (list (FundefC 'dec-if-pos 'x
+ (interp (appC 'dec-if-pos (list (NumC 5)))
+         (list (FundefC 'dec-if-pos '(x)
                         (Ifleq0C (idC 'x)
                                  (idC 'x)
                                  (BinOp '- (idC 'x) (NumC 1))))))
  4)
 
 (check-equal?
- (interp (appC 'dec-if-pos (NumC -2))
-         (list (FundefC 'dec-if-pos 'x
+ (interp (appC 'dec-if-pos (list (NumC -2)))
+         (list (FundefC 'dec-if-pos  '(x)
                         (Ifleq0C (idC 'x)
                                  (idC 'x)
                                  (BinOp '- (idC 'x) (NumC 1))))))
@@ -154,7 +156,7 @@
 
      
 ;;parse tests
-(check-equal? (parse '(double 5)) (appC 'double (NumC 5)))
+(check-equal? (parse '(double 5)) (appC 'double (list (NumC 5))))
 (check-exn #rx"VEBG3-parse: expected valid syntax, got '\\(1 a\\)" (lambda () (parse (list 1 'a))))
 
 (check-equal?
