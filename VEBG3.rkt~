@@ -1,12 +1,11 @@
 #lang typed/racket
 (require typed/rackunit)
 
-(define-type ExprC (U NumC BinOp idC appC Ifleq0C))
+(define-type ExprC (U NumC BinOp idC appC))
 (struct NumC ([n : Real]) #:transparent)
 (struct BinOp ([op : (U '+ '* '- '/)] [frst : ExprC] [snd : ExprC]) #:transparent)
 (struct idC ([s : Symbol]) #:transparent)
 (struct appC ([fun : Symbol] [arg : ExprC]) #:transparent)
-(struct Ifleq0C ([test : ExprC] [thn : ExprC] [els : ExprC]) #:transparent)
 
 (struct FundefC ([name : Symbol] [arg : Symbol] [body : ExprC]) #:transparent)
 
@@ -44,11 +43,7 @@
                      [(equal? s '/) (BinOp '/ (subst what for l) (subst what for r))]
                      [(equal? s '+) (BinOp '+ (subst what for l) (subst what for r))]
                      [(equal? s '*) (BinOp '* (subst what for l) (subst what for r))]
-                     [(equal? s '-) (BinOp '- (subst what for l) (subst what for r))])]
-    [(Ifleq0C tst thn els)
-     (Ifleq0C (subst what for tst)
-              (subst what for thn)
-              (subst what for els))]))
+                     [(equal? s '-) (BinOp '- (subst what for l) (subst what for r))])]))
 
 ;; interpretation evaluation for VEBG language
 (define (interp [a : ExprC] [fds : (Listof FundefC)]) : Real
@@ -61,11 +56,7 @@
                                    (FundefC-body fd)) fds)]
     [(BinOp o l r) (cond
                      [(equal? o '/) ((BinopTableDiv r) (interp l fds) (interp r fds))]
-                     [else ((BinopTable o) (interp l fds) (interp r fds))])]
-    [(Ifleq0C tst thn els)
-     (if (<= (interp tst fds) 0)
-         (interp thn fds)
-         (interp els fds))]))
+                     [else ((BinopTable o) (interp l fds) (interp r fds))])]))
                               
                         
 ;;parse the given concret syntax into an AST
@@ -76,8 +67,6 @@
     [(list '* left right) (BinOp '* (parse left) (parse right))]
     [(list '/ left right) (BinOp '/ (parse left) (parse right))]
     [(list '- left right) (BinOp '- (parse left) (parse right))]
-    [(list 'ifleq0? tst thn els)
-     (Ifleq0C (parse tst) (parse thn) (parse els))]
     [(list (? symbol? fun) arg) (appC fun (parse arg))] 
     [(? symbol? a) (idC a)]
     [other (error 'VEBG3-parse "expected valid syntax, got ~e" other)]))
@@ -115,16 +104,6 @@
 (check-exn #rx"VEBG3-interp: unbound identifier error: 'y"
            (lambda () (interp (appC 'div (NumC 5))
                               (list (FundefC 'div 'x (BinOp '/ (idC 'y) (NumC 1)))))))
-
-(check-equal?
- (interp (Ifleq0C (NumC 0) (NumC 1) (NumC 2)) '())
- 1)
-(check-equal?
- (interp (Ifleq0C (NumC -4) (NumC 1) (NumC 2)) '())
- 1)
-(check-equal?
- (interp (Ifleq0C (NumC 5) (NumC 1) (NumC 2)) '())
- 2)
                                                                
 ;;top-interp tests
 (check-equal? (top-interp '(* (+ 1 (- 10 (/ 1 1))) 2))20)
@@ -134,45 +113,7 @@
 (check-equal? (parse-fundef '(double x (+ x x)))
               (FundefC 'double 'x (BinOp '+ (idC 'x) (idC 'x))))
 #;(check-exn #rx"VEBG3-parse-fundef: expected valid syntax, got '()" (lambda () (parse-fundef '())))
-(check-equal?
- (interp (appC 'dec-if-pos (NumC 5))
-         (list (FundefC 'dec-if-pos 'x
-                        (Ifleq0C (idC 'x)
-                                 (idC 'x)
-                                 (BinOp '- (idC 'x) (NumC 1))))))
- 4)
-
-(check-equal?
- (interp (appC 'dec-if-pos (NumC -2))
-         (list (FundefC 'dec-if-pos 'x
-                        (Ifleq0C (idC 'x)
-                                 (idC 'x)
-                                 (BinOp '- (idC 'x) (NumC 1))))))
- -2)
      
 ;;parse tests
 (check-equal? (parse '(double 5)) (appC 'double (NumC 5)))
 (check-exn #rx"VEBG3-parse: expected valid syntax, got '\\(1 a\\)" (lambda () (parse (list 1 'a))))
-
-(check-equal?
- (parse '(ifleq0? 0 7 9))
- (Ifleq0C (NumC 0) (NumC 7) (NumC 9)))
-
-(check-equal?
- (parse '(ifleq0? (- 3 5) 10 20))
- (Ifleq0C (BinOp '- (NumC 3) (NumC 5))
-          (NumC 10)
-          (NumC 20)))
-
-;; interp + parse tests
-(check-equal?
- (interp (parse '(ifleq0? 0 44 99)) '())
- 44)
-
-(check-equal?
- (interp (parse '(ifleq0? 3 44 99)) '())
- 99)
-
-(check-equal?
- (interp (parse '(ifleq0? (- 2 5) (+ 1 1) (+ 10 10))) '())
- 2)
