@@ -60,6 +60,7 @@
                     (interp (subst arg
                                    (first (FundefC-arg fd))
                                    (FundefC-body fd)) fds)]
+    [(appC fun (list arg ...)) (error "unimplemented multi-param app")]
     [(BinOp o l r) (cond
                      [(equal? o '/) ((BinopTableDiv r) (interp l fds) (interp r fds))]
                      [else ((BinopTable o) (interp l fds) (interp r fds))])]
@@ -87,8 +88,9 @@
 ;;takes an s expresison and returns a FundefC
 (define (parse-fundef [func : Sexp]): FundefC
   (match func
-    [(list (? symbol? name) (? symbol? arg) body) (FundefC name (list arg) (parse body))]
-    [other (error 'VEBG3-parse-fundef "expected valid syntax, got ~e" other)]))
+    [(list 'named-fn (? symbol? name) (list (? symbol? arg) ...) '-> body)
+     (FundefC name (cast arg (Listof Symbol)) (parse body))]
+    [other (error 'VEBG3-parse-fundef "expected valid syntax: {named-fn f (args) -> {body}}, got ~e" other)]))
 
 ;;takes an s expression and returns a list of FundefCs
 
@@ -105,6 +107,7 @@
                                    (FundefC 'a '(e) (idC 'f))
                                    (FundefC 'target '(arg) (NumC 2))))
               (FundefC 'target '(arg) (NumC 2)))
+
 (check-exn #rx"VEBG-get-fundef: reference to undefined function" (lambda () (get-fundef 'a '())))
 
 ;;interp tests
@@ -133,9 +136,12 @@
 (check-exn #rx"VEBG3-BinopTableDiv: cannot divide by zero" (lambda () (top-interp '(/ 1 0))))
 
 ;;function parse tests
-(check-equal? (parse-fundef '(double x (+ x x)))
+(check-equal? (parse-fundef '{named-fn double (x) -> (+ x x)})
               (FundefC 'double (list 'x) (BinOp '+ (idC 'x) (idC 'x))))
-(check-exn #rx"VEBG3-parse-fundef: expected valid syntax, got '()" (lambda () (parse-fundef '())))
+(check-equal? (parse-fundef '{named-fn f (x y) -> (+ x y)})
+              (FundefC 'f '(x y) (BinOp '+ (idC 'x) (idC 'y))))
+(check-exn #rx"VEBG3-parse-fundef: expected valid syntax: {named-fn f \\(args\\) -> {body}}, got '\\(\\)"
+           (lambda () (parse-fundef '())))
 (check-equal?
  (interp (appC 'dec-if-pos (list (NumC 5)))
          (list (FundefC 'dec-if-pos '(x)
@@ -152,7 +158,8 @@
                                  (BinOp '- (idC 'x) (NumC 1))))))
  -2)
 
-(check-exn #rx"VEBG3-parse-fundef: expected valid syntax, got '()" (lambda () (parse-fundef '())))
+(check-exn #rx"VEBG3-parse-fundef: expected valid syntax: {named-fn f \\(args\\) -> {body}}, got '\\(\\)"
+           (lambda () (parse-fundef '())))
 
      
 ;;parse tests
