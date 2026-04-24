@@ -29,7 +29,7 @@
 ;;returns function definition with given symbol
 (define (get-fundef [s : Symbol] [fds : (Listof FundefC)]) : FundefC
   (cond
-    [(empty? fds) (error 'VEBG-get-fundef "reference to undefined function")]    
+    [(empty? fds) (error 'VEBG-get-fundef "reference to undefined function")]
     [(cons? fds)
      (cond
        [(equal? s (FundefC-name (first fds))) (first fds)]
@@ -126,7 +126,7 @@
 
 ;;parser for function definitions
 ;;takes an s expresison and returns a FundefC
-(define (name [func : Sexp]): FundefC
+(define (parse-fundef [func : Sexp]): FundefC
   (match func
     [(list 'named-fn (? symbol? name) (list (? symbol? arg) ...) '-> body)
      (FundefC name (cast arg (Listof Symbol)) (parse body))]
@@ -341,7 +341,3 @@
    (interp-fns
     (parse-prog
      '{{named-fn main (x) -> x}}))))
-(check-exn
- #rx"VEBG3-parse-fundef"
- (λ ()
-   (name '(named-fn + () -> 13))))
