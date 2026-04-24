@@ -82,11 +82,15 @@
   (match a
     [(NumC n) n]
     [(idC i) (error 'VEBG3-interp "unbound identifier error: ~e" i)]
-    [(appC fun (list arg)) (define fd (get-fundef fun fds))
-                    (interp (subst arg
-                                   (first (FundefC-arg fd))
-                                   (FundefC-body fd)) fds)]
+    [(appC fun (list arg))
+     (define fd (get-fundef fun fds))
+     (define arg-val (interp arg fds))
+     (interp (subst (NumC arg-val)
+                    (first (FundefC-arg fd))
+                    (FundefC-body fd))
+             fds)]
     [(appC fun (list args ...)) (define fd (get-fundef fun fds))
+                                (define evaluated-args (map (lambda ([a : ExprC]) (NumC (interp a fds))) args))
                                 (define subs (match-args args (FundefC-arg fd)))
                                 (interp (fold-sub subs (FundefC-body fd)) fds)]
     [(BinOp o l r) (cond
@@ -120,16 +124,50 @@
                            [eq? a '*]
                            [eq? a '/]
                            [eq? a '->]
+                           [eq? a 'ifleq0?]
                            [eq? a 'named-fn])
                        (error 'VEBG3-parse "invalid id, got ~e" a) (idC a))]
-    [other (error 'VEBG3-parse "expected valid syntax, got ~e" other)]))
+    [other (error 'VEBG3-parse "expected valid syntax, got ~e" other)])) 
 
+
+;;;helper for parse-fundef, below
+(define (reserved-word? [s : Symbol]) : Boolean
+  (or (symbol=? s '+)
+      (symbol=? s '-)
+      (symbol=? s '*)
+      (symbol=? s '/)
+      (symbol=? s 'named-fn)
+      (symbol=? s '->)
+      (symbol=? s 'ifleq0?)))
+
+(define (has-duplicates? [xs : (Listof Symbol)]) : Boolean
+  (cond
+    [(empty? xs) #f]
+    [(member (first xs) (rest xs)) #t]
+    [else (has-duplicates? (rest xs))]))
 ;;parser for function definitions
 ;;takes an s expresison and returns a FundefC
 (define (parse-fundef [func : Sexp]): FundefC
   (match func
     [(list 'named-fn (? symbol? name) (list (? symbol? arg) ...) '-> body)
-     (FundefC name (cast arg (Listof Symbol)) (parse body))]
+     (cond
+       [(reserved-word? name)
+        (error 'VEBG3-parse-fundef "invalid function name, got ~e" name)]
+       [else
+        (define params (cast arg (Listof Symbol)))
+        (cond
+          [(has-duplicates? params)
+           (error 'VEBG3-parse-fundef
+              "duplicate parameter names in function ~e: ~e"
+              name
+              params)]
+          [(ormap reserved-word? params)
+           (error 'VEBG3-parse-fundef
+              "invalid parameter name in function ~e: ~e"
+              name
+              params)]
+          [else
+           (FundefC name params (parse body))])])]
     [other (error 'VEBG3-parse-fundef "expected valid syntax:
 {named-fn f (args) -> {body}}, got ~e" other)]))
 
@@ -137,7 +175,11 @@
 (define (parse-prog [exp : Sexp]) : (Listof FundefC)
   (match exp
     [(list defs ...)
-     (map parse-fundef defs)]
+     (define parsed-defs (map parse-fundef defs))
+     (define names (map FundefC-name parsed-defs))
+     (if (has-duplicates? names)
+         (error 'VEBG3-parse-prog "duplicate function names in program: ~e" names)
+         parsed-defs)]
     [other
      (error 'VEBG3-parse-prog "VEBG: invalid program ~e" other)]))
 
@@ -341,3 +383,26 @@
    (interp-fns
     (parse-prog
      '{{named-fn main (x) -> x}}))))
+
+(check-exn
+ #rx"VEBG3-parse-fundef: duplicate parameter names"
+ (λ ()
+   (parse-fundef '{named-fn f (x x) -> (+ x x)})))
+
+(check-exn
+ #rx"VEBG3-parse-fundef: invalid function name"
+ (λ ()
+   (parse-fundef '{named-fn + (x) -> x})))
+
+(check-exn
+ #rx"VEBG3-parse-fundef: invalid parameter name"
+ (λ ()
+   (parse-fundef '{named-fn f (x ifleq0?) -> x})))
+
+(check-exn
+ #rx"VEBG3-parse-prog: duplicate function names"
+ (λ ()
+   (parse-prog
+    '{{named-fn f () -> 1}
+      {named-fn f () -> 2}
+      {named-fn main () -> 0}})))
