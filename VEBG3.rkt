@@ -115,6 +115,7 @@
                            [eq? a '->]
                            [eq? a 'named-fn])
                        (error 'VEBG3-parse "invalid id, got ~e" a) (idC a))]
+    [(list (? symbol? a)) (parse a)]
     [other (error 'VEBG3-parse "expected valid syntax, got ~e" other)]))
 
 ;;parser for function definitions
@@ -126,11 +127,10 @@
     [other (error 'VEBG3-parse-fundef "expected valid syntax: {named-fn f (args) -> {body}}, got ~e" other)]))
 
 ;;takes an s expression and returns a list of FundefCs
-
-#;(check-equal? (parse-prog '{{named-fn f () -> 5}
-                             {named-fn main () -> {+ {f} {f}}}})
-              (list (FundefC 'f '() (NumC 5))
-                    (FundefC 'main '() (BinOp '+ (idC 'f) (idC 'f)))))
+(define (parse-prog [exp : Sexp]) : (Listof FundefC)
+  (match exp
+    ['() '()]
+    [(cons fst rst) (cons (parse-fundef fst) (parse-prog rst))]))
 
 ;;takes an s-expression and calles parser and interp
 (define (top-interp [expr : Sexp]) : Real
@@ -180,6 +180,12 @@
 (check-equal?
  (interp (Ifleq0C (NumC 5) (NumC 1) (NumC 2)) '())
  2)
+
+;;parse-prog test
+(check-equal? (parse-prog '{{named-fn f () -> 5}
+                             {named-fn main () -> {+ {f} {f}}}})
+              (list (FundefC 'f '() (NumC 5))
+                    (FundefC 'main '() (BinOp '+ (idC 'f) (idC 'f)))))
                                                                
 ;;top-interp tests
 (check-equal? (top-interp '(* (+ 1 (- 10 (/ 1 1))) 2))20)
