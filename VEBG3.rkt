@@ -10,6 +10,8 @@
 
 (struct FundefC ([name : Symbol] [arg : (Listof Symbol)] [body : ExprC]) #:transparent)
 
+(define-type keywords (U '+ '- '* '/ 'named-fn '-> 'ifleq0?))
+
 ;;binop lookup
 (define (BinopTable [op : Symbol])
   (match op
@@ -33,24 +35,44 @@
 
 ;;takes two ExprCs (what to replace the name with and the experssion to do sub in)
 ;; and a symbol (name to replace) returns an ExprC
-(define (subst [what : ExprC] [for : Symbol] [in : ExprC]) : ExprC
+(define (subst [what : ExprC] [name : Symbol] [in : ExprC]) : ExprC
   (match in
     [(NumC n) in]
     [(idC s) (cond
-               [(symbol=? s for) what]
+               [(symbol=? s name) what]
                [else in])]
-    [(appC f (list a)) (appC f (list (subst what for a)))]
-    [(appC f (list a ...)) (error "unimplemented multi-arg app")]
+    [(appC f (list a)) (appC f (list (subst what name a)))]
+    [(appC f (cons fst rst)) (appC f (cons (subst what name fst)
+                                           (map (lambda (r) (subst what name (cast r ExprC))) rst)))]
     [(BinOp s l r) (cond
-                     [(equal? s '/) (BinOp '/ (subst what for l) (subst what for r))]
-                     [(equal? s '+) (BinOp '+ (subst what for l) (subst what for r))]
-                     [(equal? s '*) (BinOp '* (subst what for l) (subst what for r))]
-                     [(equal? s '-) (BinOp '- (subst what for l) (subst what for r))])]
+                     [(equal? s '/) (BinOp '/ (subst what name l) (subst what name r))]
+                     [(equal? s '+) (BinOp '+ (subst what name l) (subst what name r))]
+                     [(equal? s '*) (BinOp '* (subst what name l) (subst what name r))]
+                     [(equal? s '-) (BinOp '- (subst what name l) (subst what name r))])]
     [(Ifleq0C tst thn els)
-     (Ifleq0C (subst what for tst)
-              (subst what for thn)
-              (subst what for els))]))
+     (Ifleq0C (subst what name tst)
+              (subst what name thn)
+              (subst what name els))]))
 
+;;takes a list of arguments and a function
+;;returns a function with arguments substituted into function
+(define (match-args [args : (Listof ExprC)] [params : (Listof Symbol)])
+  : (Listof (Listof (U ExprC Symbol)))
+  (match* (args params)
+    [('() '()) '()]
+    [((cons f1 r1) (cons f2 r2)) (cons  (cons f1 (cons f2 '()))
+                                       (match-args r1 r2))]))
+
+;;takes a list of lists (of ExprCs and Symbols) and an ExprC
+;;returns an ExprC with variables substituted
+(define (fold-sub [subs : (Listof (Listof (U ExprC Symbol)))]
+                  [exp : ExprC]) : ExprC
+  (match subs
+    ['() exp]
+    [(cons [list arg param] rest)
+     (fold-sub rest (subst (cast arg ExprC) (cast param Symbol) exp))]))
+    
+                                                                
 ;; interpretation evaluation for VEBG language
 (define (interp [a : ExprC] [fds : (Listof FundefC)]) : Real
   (match a
@@ -60,7 +82,9 @@
                     (interp (subst arg
                                    (first (FundefC-arg fd))
                                    (FundefC-body fd)) fds)]
-    [(appC fun (list arg ...)) (error "unimplemented multi-param app")]
+    [(appC fun (list args ...)) (define fd (get-fundef fun fds))
+                                (define subs (match-args args (FundefC-arg fd)))
+                                (interp (fold-sub subs (FundefC-body fd)) fds)]
     [(BinOp o l r) (cond
                      [(equal? o '/) ((BinopTableDiv r) (interp l fds) (interp r fds))]
                      [else ((BinopTable o) (interp l fds) (interp r fds))])]
@@ -68,7 +92,10 @@
      (if (<= (interp tst fds) 0)
          (interp thn fds)
          (interp els fds))]))
-                              
+
+(check-equal? (interp (appC 'f (list (NumC 1) (NumC 2)))
+                      (list (FundefC 'f '(x y) (BinOp '+ (idC 'x) (idC 'y)))))
+              3)
                         
 ;;parse the given concret syntax into an AST
 (define (parse [prog : Sexp]): ExprC
@@ -81,7 +108,13 @@
     [(list 'ifleq0? tst thn els)
      (Ifleq0C (parse tst) (parse thn) (parse els))]
     [(list (? symbol? fun) arg) (appC fun (list (parse arg)))] 
-    [(? symbol? a) (idC a)]
+    [(? symbol? a) (if (or [eq? a '+]
+                           [eq? a '-]
+                           [eq? a '*]
+                           [eq? a '/]
+                           [eq? a '->]
+                           [eq? a 'named-fn])
+                       (error 'VEBG3-parse "invalid id, got ~e" a) (idC a))]
     [other (error 'VEBG3-parse "expected valid syntax, got ~e" other)]))
 
 ;;parser for function definitions
@@ -94,6 +127,11 @@
 
 ;;takes an s expression and returns a list of FundefCs
 
+#;(check-equal? (parse-prog '{{named-fn f () -> 5}
+                             {named-fn main () -> {+ {f} {f}}}})
+              (list (FundefC 'f '() (NumC 5))
+                    (FundefC 'main '() (BinOp '+ (idC 'f) (idC 'f)))))
+
 ;;takes an s-expression and calles parser and interp
 (define (top-interp [expr : Sexp]) : Real
   (interp
@@ -101,6 +139,18 @@
    (list (FundefC 'a (list 'b) (idC 'c)))))
 
 ;;---tests------------------------------------------------------------------------------------------------
+
+;;match-args test
+(check-equal? (match-args (list (NumC 1) (NumC 2) (NumC 3)) '(x y z))
+              (list (list (NumC 1) 'x) (list (NumC 2) 'y) (list (NumC 3) 'z)))
+
+;;fold-sub test
+(check-equal? (fold-sub (list (list (NumC 1) 'x) (list (NumC 2) 'y))
+                        (BinOp '+ (idC 'x) (idC 'y)))
+              (BinOp '+ (NumC 1) (NumC 2)))
+;;subst tests
+(check-equal? (subst (NumC 1) 'x (appC 'f (list (idC 'x) (idC 'y) (idC 'z))))
+              (appC 'f (list (NumC 1) (idC 'y) (idC 'z))))
 
 ;;get-fundef tests
 (check-equal? (get-fundef 'target (list
@@ -161,9 +211,9 @@
 (check-exn #rx"VEBG3-parse-fundef: expected valid syntax: {named-fn f \\(args\\) -> {body}}, got '\\(\\)"
            (lambda () (parse-fundef '())))
 
-     
 ;;parse tests
 (check-equal? (parse '(double 5)) (appC 'double (list (NumC 5))))
+(check-exn #rx"VEBG3-parse: invalid id, got '+" (lambda () (parse '+)))
 (check-exn #rx"VEBG3-parse: expected valid syntax, got '\\(1 a\\)" (lambda () (parse (list 1 'a))))
 
 (check-equal?
