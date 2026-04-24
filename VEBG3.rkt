@@ -54,14 +54,16 @@
               (subst what name thn)
               (subst what name els))]))
 
-;;takes a list of arguments and a function
-;;returns a function with arguments substituted into function
+;;takes a list of ExprC (arguments) symbols (parameters)
+;;returns a list of lists containing a pair of arguments to parameters
 (define (match-args [args : (Listof ExprC)] [params : (Listof Symbol)])
   : (Listof (Listof (U ExprC Symbol)))
   (match* (args params)
     [('() '()) '()]
     [((cons f1 r1) (cons f2 r2)) (cons  (cons f1 (cons f2 '()))
-                                       (match-args r1 r2))]))
+                                       (match-args r1 r2))]
+    [((cons f1 r1) '()) (error 'VEBG3-interp "input mismatch, too many arguments: ~e" args )]
+    [('() (cons f2 r2)) (error 'VEBG3-interp "input mismatch, not enough arguments: ~e"  params)]))
 
 ;;takes a list of lists (of ExprCs and Symbols) and an ExprC
 ;;returns an ExprC with variables substituted
@@ -221,6 +223,10 @@
 (check-equal? (parse '(double 5)) (appC 'double (list (NumC 5))))
 (check-exn #rx"VEBG3-parse: invalid id, got '+" (lambda () (parse '+)))
 (check-exn #rx"VEBG3-parse: expected valid syntax, got '\\(1 a\\)" (lambda () (parse (list 1 'a))))
+(check-exn #rx"VEBG3-interp: input mismatch, not enough arguments: '\\(y\\)"
+           (lambda () (match-args (list (NumC 5)) (list 'x 'y))))
+(check-exn #rx"VEBG3-interp: input mismatch, too many arguments: \\(list \\(NumC 5\\)\\)"
+           (lambda () (match-args (list (NumC 5)) '())))
 
 (check-equal?
  (parse '(ifleq0? 0 7 9))
