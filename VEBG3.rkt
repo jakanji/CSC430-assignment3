@@ -20,10 +20,6 @@
     ['+ +]
     ['- -]
     ['* *]))
-(define (BinopTableDiv [divisor : ExprC])
-  (match divisor
-    [(NumC 0) (error 'VEBG3-BinopTableDiv "cannot divide by zero")]
-    [_ /]))
 
 ;;takes a symbol and list of function definitions
 ;;returns function definition with given symbol
@@ -93,9 +89,16 @@
                                 (define evaluated-args (map (lambda ([a : ExprC]) (NumC (interp a fds))) args))
                                 (define subs (match-args args (FundefC-arg fd)))
                                 (interp (fold-sub subs (FundefC-body fd)) fds)]
-    [(BinOp o l r) (cond
-                     [(equal? o '/) ((BinopTableDiv r) (interp l fds) (interp r fds))]
-                     [else ((BinopTable o) (interp l fds) (interp r fds))])]
+    [(BinOp o l r)
+     (define l-val (interp l fds))
+     (define r-val (interp r fds))
+     (cond
+       [(equal? o '/)
+        (if (zero? r-val)
+            (error 'VEBG3-BinopTableDiv "cannot divide by zero")
+            (/ l-val r-val))]
+   [else
+    ((BinopTable o) l-val r-val)])]
     [(Ifleq0C tst thn els)
      (if (<= (interp tst fds) 0)
          (interp thn fds)
