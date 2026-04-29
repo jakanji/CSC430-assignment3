@@ -79,7 +79,7 @@
     
                                                                 
 ;; interpretation evaluation for VEBG language
-(define (interp [a : ExprC] [fds : (Listof FundefC)]) : Real
+(define (interp [a : ExprC] [fds : (Listof FundefC)] [env : Env]) : Real
   (match a
     [(NumC n) n]
     [(idC i) (error 'VEBG-interp "unbound identifier error: ~e" i)]
@@ -95,8 +95,8 @@
                                 (define subs (match-args evaluated-args (FundefC-arg fd)))
                                 (interp (fold-sub subs (FundefC-body fd)) fds)]
     [(BinOp o l r)
-     (define l-val (interp l fds))
-     (define r-val (interp r fds))
+     (define l-val (interp l fds env))
+     (define r-val (interp r fds env))
      (cond
        [(equal? o '/)
         (if (zero? r-val)
@@ -110,7 +110,8 @@
          (interp els fds))]))
 
 (check-equal? (interp (appC 'f (list (NumC 1) (NumC 2)))
-                      (list (FundefC 'f '(x y) (BinOp '+ (idC 'x) (idC 'y)))))
+                      (list (FundefC 'f '(x y) (BinOp '+ (idC 'x) (idC 'y))))
+                      (list (Binding 'w 1)))
               3)
                         
 ;;parse the given concret syntax into an AST
@@ -199,7 +200,7 @@
     [(not (empty? (FundefC-arg main-fn)))
      (error 'VEBG-interp-fns "main must have no arguments")]
     [else
-     (interp (FundefC-body main-fn) funs)]))
+     (interp (FundefC-body main-fn) funs (list (Binding 'w 1)))]))
 
 ;;takes an s-expression and calles parser and interp
 (: top-interp (Sexp -> Real))
@@ -237,21 +238,26 @@
 
                             (FundefC 'mult '(a) (BinOp '* (idC 'a) (appC 'div (list (NumC 1)))))
 
-                            (FundefC 'div '(y) (BinOp '/ (idC 'y) (NumC 1)))))
+                            (FundefC 'div '(y) (BinOp '/ (idC 'y) (NumC 1))))
+                      (list (Binding 'w 1)))
               4)
 (check-exn #rx"VEBG-interp: unbound identifier error: 'y"
            (lambda () (interp (appC 'div (list (NumC 5)))
-                              (list (FundefC 'div (list 'x) (BinOp '/ (idC 'y) (NumC 1)))))))
+                              (list (FundefC 'div (list 'x) (BinOp '/ (idC 'y) (NumC 1))))
+                              (list (Binding 'w 1)))))
 
 ;;ifleq tests
 (check-equal?
- (interp (Ifleq0C (NumC 0) (NumC 1) (NumC 2)) '())
+ (interp (Ifleq0C (NumC 0) (NumC 1) (NumC 2)) '()
+         (list (Binding 'w 1)))
  1)
 (check-equal?
- (interp (Ifleq0C (NumC -4) (NumC 1) (NumC 2)) '())
+ (interp (Ifleq0C (NumC -4) (NumC 1) (NumC 2)) '()
+         (list (Binding 'w 1)))
  1)
 (check-equal?
- (interp (Ifleq0C (NumC 5) (NumC 1) (NumC 2)) '())
+ (interp (Ifleq0C (NumC 5) (NumC 1) (NumC 2)) '()
+         (list (Binding 'w 1)))
  2)
 
 ;;parse-prog test
@@ -277,7 +283,8 @@
          (list (FundefC 'dec-if-pos '(x)
                         (Ifleq0C (idC 'x)
                                  (idC 'x)
-                                 (BinOp '- (idC 'x) (NumC 1))))))
+                                 (BinOp '- (idC 'x) (NumC 1)))))
+         (list (Binding 'w 1)))
  4)
 
 (check-equal?
@@ -285,7 +292,8 @@
          (list (FundefC 'dec-if-pos  '(x)
                         (Ifleq0C (idC 'x)
                                  (idC 'x)
-                                 (BinOp '- (idC 'x) (NumC 1))))))
+                                 (BinOp '- (idC 'x) (NumC 1)))))
+         (list (Binding 'w 1)))
  -2)
 
 (check-exn #rx"VEBG-parse-fundef: expected valid syntax"
@@ -313,15 +321,18 @@
 
 ;; interp + parse tests
 (check-equal?
- (interp (parse '(ifleq0? 0 44 99)) '())
+ (interp (parse '(ifleq0? 0 44 99)) '()
+         (list (Binding 'w 1)))
  44)
 
 (check-equal?
- (interp (parse '(ifleq0? 3 44 99)) '())
+ (interp (parse '(ifleq0? 3 44 99)) '()
+         (list (Binding 'w 1)))
  99)
 
 (check-equal?
- (interp (parse '(ifleq0? (- 2 5) (+ 1 1) (+ 10 10))) '())
+ (interp (parse '(ifleq0? (- 2 5) (+ 1 1) (+ 10 10))) '()
+         (list (Binding 'w 1)))
  2)
 
 (check-exn
