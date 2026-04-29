@@ -52,7 +52,7 @@
               (subst what name thn)
               (subst what name els))]))
 
-;;takes a list of ExprC (arguments) symbols (parameters)
+;;takes a list of ExprCs (arguments) and symbols (parameters)
 ;;returns a list of lists containing a pair of arguments to parameters
 (define (match-args [args : (Listof ExprC)] [params : (Listof Symbol)])
   : (Listof (Listof (U ExprC Symbol)))
@@ -87,7 +87,7 @@
              fds)]
     [(appC fun (list args ...)) (define fd (get-fundef fun fds))
                                 (define evaluated-args (map (lambda ([a : ExprC]) (NumC (interp a fds))) args))
-                                (define subs (match-args args (FundefC-arg fd)))
+                                (define subs (match-args evaluated-args (FundefC-arg fd)))
                                 (interp (fold-sub subs (FundefC-body fd)) fds)]
     [(BinOp o l r)
      (define l-val (interp l fds))
