@@ -76,22 +76,35 @@
     ['() exp]
     [(cons [list arg param] rest)
      (fold-sub rest (subst (cast arg ExprC) (cast param Symbol) exp))]))
-    
+
+;;takes a symbol to lookup and an environment
+;; returns a number to bind to the symbol
+(define (lookup [query : Symbol] [env : Env]) : Real
+  (match env
+    ['() (error 'VEBG-lookup "name not found: ~e" query)]
+    [(cons (Binding name val) rst)
+     (cond
+       [(symbol=? query name) val]
+       [else (lookup query rst)])]))
+
+(check-equal? (interp (BinOp '+ (NumC 10) (appC 'const5 (NumC 10)))
+                        (list (FundefC 'const5 '_ (NumC 5)))
+                        mt-env)
+                15)
                                                                 
 ;; interpretation evaluation for VEBG language
 (define (interp [a : ExprC] [fds : (Listof FundefC)] [env : Env]) : Real
   (match a
     [(NumC n) n]
-    [(idC i) (error 'VEBG-interp "unbound identifier error: ~e" i)]
+    [(idC i) (lookup i env)]
     [(appC fun (list arg))
-     (define fd (get-fundef fun fds))
-     (define arg-val (interp arg fds
-                             (list (Binding 'placeholder 0))))
-     (interp (subst (NumC arg-val)
-                    (first (FundefC-arg fd))
-                    (FundefC-body fd))
+     (define fd (get-fundef fun fds)) 
+     (interp (FundefC-body fd)
              fds
-             (list (Binding 'placeholder 0)))]
+             (extend-env
+              (Binding (first (FundefC-arg fd))
+                    (interp arg fds env)) env))]
+    
     [(appC fun (list args ...)) (define fd (get-fundef fun fds))
                                 (define evaluated-args (map (lambda ([a : ExprC]) (NumC (interp a fds
                                                                                                 (list (Binding 'placeholder 0))))) args))
@@ -115,6 +128,7 @@
                  (list (Binding 'placeholder 0)))
          (interp els fds
                  (list (Binding 'placeholder 0))))]))
+
 
 (check-equal? (interp (appC 'f (list (NumC 1) (NumC 2)))
                       (list (FundefC 'f '(x y) (BinOp '+ (idC 'x) (idC 'y))))
@@ -215,6 +229,11 @@
   (interp-fns (parse-prog fun-sexps)))
 
 ;;---tests------------------------------------------------------------------------------------------------
+
+;;lookup test
+(check-equal? (lookup 'x (list (Binding 'x 1)
+                               (Binding 'y 2)))
+              1)
 
 ;;match-args test
 (check-equal? (match-args (list (NumC 1) (NumC 2) (NumC 3)) '(x y z))
