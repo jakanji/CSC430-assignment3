@@ -36,46 +36,7 @@
        [(equal? s (FundefC-name (first fds))) (first fds)]
        [else (get-fundef s (rest fds))])]))
 
-;;takes two ExprCs (what to replace the name with and the experssion to do sub in)
-;; and a symbol (name to replace) returns an ExprC
-(define (subst [what : ExprC] [name : Symbol] [in : ExprC]) : ExprC
-  (match in
-    [(NumC n) in]
-    [(idC s) (cond
-               [(symbol=? s name) what]
-               [else in])]
-    [(appC f (list a)) (appC f (list (subst what name a)))]
-    [(appC f (cons fst rst)) (appC f (cons (subst what name fst)
-                                           (map (lambda (r) (subst what name (cast r ExprC))) rst)))]
-    [(BinOp s l r) (cond
-                     [(equal? s '/) (BinOp '/ (subst what name l) (subst what name r))]
-                     [(equal? s '+) (BinOp '+ (subst what name l) (subst what name r))]
-                     [(equal? s '*) (BinOp '* (subst what name l) (subst what name r))]
-                     [(equal? s '-) (BinOp '- (subst what name l) (subst what name r))])]
-    [(Ifleq0C tst thn els)
-     (Ifleq0C (subst what name tst)
-              (subst what name thn)
-              (subst what name els))]))
 
-;;takes a list of ExprCs (arguments) and symbols (parameters)
-;;returns a list of lists containing a pair of arguments to parameters
-(define (match-args [args : (Listof ExprC)] [params : (Listof Symbol)])
-  : (Listof (Listof (U ExprC Symbol)))
-  (match* (args params)
-    [('() '()) '()]
-    [((cons f1 r1) (cons f2 r2)) (cons  (cons f1 (cons f2 '()))
-                                       (match-args r1 r2))]
-    [((cons f1 r1) '()) (error 'VEBG-interp "input mismatch, too many arguments: ~e" args )]
-    [('() (cons f2 r2)) (error 'VEBG-interp "input mismatch, not enough arguments: ~e"  params)]))
-
-;;takes a list of lists (of ExprCs and Symbols) and an ExprC
-;;returns an ExprC with variables substituted
-(define (fold-sub [subs : (Listof (Listof (U ExprC Symbol)))]
-                  [exp : ExprC]) : ExprC
-  (match subs
-    ['() exp]
-    [(cons [list arg param] rest)
-     (fold-sub rest (subst (cast arg ExprC) (cast param Symbol) exp))]))
 
 ;;takes a symbol to lookup and an environment
 ;; returns a number to bind to the symbol
@@ -87,10 +48,16 @@
        [(symbol=? query name) val]
        [else (lookup query rst)])]))
 
-(check-equal? (interp (BinOp '+ (NumC 10) (appC 'const5 (NumC 10)))
-                        (list (FundefC 'const5 '_ (NumC 5)))
-                        mt-env)
-                15)
+;;takes a list of ExprCs (arguments) and symbols (parameters)
+;;returns a list of bindings of arguments to parameters
+(define (match-args [params : (Listof Symbol)] [args : (Listof Real)] [env : Env])
+  : Env
+  (match* (params args)
+    [('() '()) env]
+    [((cons f1 r1) (cons f2 r2)) (extend-env (Binding f1 f2)
+                                       (match-args r1 r2 env))]
+    [((cons f1 r1) '()) (error 'VEBG-interp "input mismatch, too many arguments: ~e" args )]
+    [('() (cons f2 r2)) (error 'VEBG-interp "input mismatch, not enough arguments: ~e"  params)]))
                                                                 
 ;; interpretation evaluation for VEBG language
 (define (interp [a : ExprC] [fds : (Listof FundefC)] [env : Env]) : Real
@@ -104,13 +71,14 @@
              (extend-env
               (Binding (first (FundefC-arg fd))
                     (interp arg fds env)) env))]
-    
-    [(appC fun (list args ...)) (define fd (get-fundef fun fds))
-                                (define evaluated-args (map (lambda ([a : ExprC]) (NumC (interp a fds
-                                                                                                (list (Binding 'placeholder 0))))) args))
-                                (define subs (match-args evaluated-args (FundefC-arg fd)))
-                                (interp (fold-sub subs (FundefC-body fd)) fds
-                                        (list (Binding 'placeholder 0)))]
+    [(appC fun (list args ...))
+     (define fd (get-fundef fun fds))
+     (define evaluated-args (map
+                             (lambda ([a : ExprC]) (interp a fds env))
+                             args))
+     (interp (FundefC-body fd)
+             fds
+             (match-args (FundefC-arg fd) evaluated-args env))]
     [(BinOp o l r)
      (define l-val (interp l fds env))
      (define r-val (interp r fds env))
@@ -123,16 +91,16 @@
     ((BinopTable o) l-val r-val)])]
     [(Ifleq0C tst thn els)
      (if (<= (interp tst fds
-                     (list (Binding 'placeholder 0))) 0)
+                     mt-env) 0)
          (interp thn fds
-                 (list (Binding 'placeholder 0)))
+                 mt-env)
          (interp els fds
-                 (list (Binding 'placeholder 0))))]))
+                 mt-env))]))
 
 
 (check-equal? (interp (appC 'f (list (NumC 1) (NumC 2)))
                       (list (FundefC 'f '(x y) (BinOp '+ (idC 'x) (idC 'y))))
-                      (list (Binding 'placeholder 0)))
+                      mt-env)
               3)
                         
 ;;parse the given concret syntax into an AST
@@ -221,7 +189,7 @@
     [(not (empty? (FundefC-arg main-fn)))
      (error 'VEBG-interp-fns "main must have no arguments")]
     [else
-     (interp (FundefC-body main-fn) funs (list (Binding 'placeholder 0)))]))
+     (interp (FundefC-body main-fn) funs mt-env)]))
 
 ;;takes an s-expression and calles parser and interp
 (: top-interp (Sexp -> Real))
@@ -234,18 +202,6 @@
 (check-equal? (lookup 'x (list (Binding 'x 1)
                                (Binding 'y 2)))
               1)
-
-;;match-args test
-(check-equal? (match-args (list (NumC 1) (NumC 2) (NumC 3)) '(x y z))
-              (list (list (NumC 1) 'x) (list (NumC 2) 'y) (list (NumC 3) 'z)))
-
-;;fold-sub test
-(check-equal? (fold-sub (list (list (NumC 1) 'x) (list (NumC 2) 'y))
-                        (BinOp '+ (idC 'x) (idC 'y)))
-              (BinOp '+ (NumC 1) (NumC 2)))
-;;subst tests
-(check-equal? (subst (NumC 1) 'x (appC 'f (list (idC 'x) (idC 'y) (idC 'z))))
-              (appC 'f (list (NumC 1) (idC 'y) (idC 'z))))
 
 ;;get-fundef tests
 (check-equal? (get-fundef 'target (list
@@ -265,25 +221,25 @@
                             (FundefC 'mult '(a) (BinOp '* (idC 'a) (appC 'div (list (NumC 1)))))
 
                             (FundefC 'div '(y) (BinOp '/ (idC 'y) (NumC 1))))
-                      (list (Binding 'placeholder 0)))
+                      mt-env)
               4)
 (check-exn #rx"VEBG-interp: unbound identifier error: 'y"
            (lambda () (interp (appC 'div (list (NumC 5)))
                               (list (FundefC 'div (list 'x) (BinOp '/ (idC 'y) (NumC 1))))
-                              (list (Binding 'placeholder 0)))))
+                              mt-env)))
 
 ;;ifleq tests
 (check-equal?
  (interp (Ifleq0C (NumC 0) (NumC 1) (NumC 2)) '()
-         (list (Binding 'placeholder 0)))
+         mt-env)
  1)
 (check-equal?
  (interp (Ifleq0C (NumC -4) (NumC 1) (NumC 2)) '()
-         (list (Binding 'placeholder 0)))
+         mt-env)
  1)
 (check-equal?
  (interp (Ifleq0C (NumC 5) (NumC 1) (NumC 2)) '()
-         (list (Binding 'placeholder 0)))
+         mt-env)
  2)
 
 ;;parse-prog test
@@ -310,7 +266,7 @@
                         (Ifleq0C (idC 'x)
                                  (idC 'x)
                                  (BinOp '- (idC 'x) (NumC 1)))))
-         (list (Binding 'placeholder 0)))
+         mt-env)
  4)
 
 (check-equal?
@@ -319,7 +275,7 @@
                         (Ifleq0C (idC 'x)
                                  (idC 'x)
                                  (BinOp '- (idC 'x) (NumC 1)))))
-         (list (Binding 'placeholder 0)))
+         mt-env)
  -2)
 
 (check-exn #rx"VEBG-parse-fundef: expected valid syntax"
@@ -331,9 +287,9 @@
 (check-exn #rx"VEBG-parse: invalid id, got '+" (lambda () (parse '+)))
 (check-exn #rx"VEBG-parse: expected valid syntax, got '\\(1 a\\)" (lambda () (parse (list 1 'a))))
 (check-exn #rx"VEBG-interp: input mismatch, not enough arguments: '\\(y\\)"
-           (lambda () (match-args (list (NumC 5)) (list 'x 'y))))
+           (lambda () (match-args (list 'x 'y) (list 5) mt-env)))
 (check-exn #rx"VEBG-interp: input mismatch, too many arguments: \\(list \\(NumC 5\\)\\)"
-           (lambda () (match-args (list (NumC 5)) '())))
+           (lambda () (match-args '() (list 5) mt-env)))
 
 (check-equal?
  (parse '(ifleq0? 0 7 9))
@@ -348,17 +304,17 @@
 ;; interp + parse tests
 (check-equal?
  (interp (parse '(ifleq0? 0 44 99)) '()
-         (list (Binding 'placeholder 0)))
+         mt-env)
  44)
 
 (check-equal?
  (interp (parse '(ifleq0? 3 44 99)) '()
-         (list (Binding 'placeholder 0)))
+         mt-env)
  99)
 
 (check-equal?
  (interp (parse '(ifleq0? (- 2 5) (+ 1 1) (+ 10 10))) '()
-         (list (Binding 'placeholder 0)))
+         mt-env)
  2)
 
 (check-exn
