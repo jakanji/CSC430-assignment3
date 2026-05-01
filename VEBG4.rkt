@@ -143,6 +143,7 @@
     [(empty? xs) #f]
     [(member (first xs) (rest xs)) #t]
     [else (has-duplicates? (rest xs))]))
+
 ;;parser for function definitions
 ;;takes an s expresison and returns a FundefC
 (define (parse-fundef [func : Sexp]): FundefC
