@@ -204,14 +204,6 @@
                                (Binding 'y 2)))
               1)
 
-;;get-fundef tests
-(check-equal? (get-fundef 'target (list
-                                   (FundefC 'a '(e) (idC 'f))
-                                   (FundefC 'target '(arg) (NumC 2))))
-              (FundefC 'target '(arg) (NumC 2)))
-
-(check-exn #rx"VEBG-get-fundef: reference to undefined function" (lambda () (get-fundef 'a '())))
-
 ;;interp tests
 (check-equal? (interp (appC 'add (list (NumC 5)))
                       (list (FundefC 'add '(x)
@@ -224,6 +216,15 @@
                             (FundefC 'div '(y) (BinOp '/ (idC 'y) (NumC 1))))
                       mt-env)
               4)
+(check-equal?
+ (interp (appC 'dec-if-pos (list (NumC -2)))
+         (list (FundefC 'dec-if-pos  '(x)
+                        (Ifleq0C (idC 'x)
+                                 (idC 'x)
+                                 (BinOp '- (idC 'x) (NumC 1)))))
+         mt-env)
+ -2)
+
 (check-exn #rx"VEBG-interp: unbound identifier error: 'y"
            (lambda () (interp (appC 'div (list (NumC 5)))
                               (list (FundefC 'div (list 'x) (BinOp '/ (idC 'y) (NumC 1))))
@@ -243,41 +244,12 @@
          mt-env)
  2)
 
-;;parse-prog test
-(check-equal? (parse-prog '{{named-fn f () -> 5}
-                             {named-fn main () -> {+ {f} {f}}}})
-              (list (FundefC 'f '() (NumC 5))
-                    (FundefC 'main '() (BinOp '+ (appC 'f '()) (appC 'f '())))))
-                                                               
+                                                         
 ;;top-interp tests
-#;(check-equal? (top-interp '{{named-fn main () -> {* {+ 1 {- 10 {/ 1 1}}} 2}}}) 20)
+(check-equal? (top-interp '{{named-fn main () -> {* {+ 1 {- 10 {/ 1 1}}} 2}}}) 20)
 (check-exn #rx"VEBG-BinopTableDiv: cannot divide by zero"
            (lambda () (top-interp '{{named-fn main () -> {/ 1 0}}})))
 
-;;function parse tests
-(check-equal? (parse-fundef '{named-fn double (x) -> (+ x x)})
-              (FundefC 'double (list 'x) (BinOp '+ (idC 'x) (idC 'x))))
-(check-equal? (parse-fundef '{named-fn f (x y) -> (+ x y)})
-              (FundefC 'f '(x y) (BinOp '+ (idC 'x) (idC 'y))))
-(check-exn #rx"VEBG-parse-fundef: expected valid syntax"
-           (lambda () (parse-fundef '())))
-(check-equal?
- (interp (appC 'dec-if-pos (list (NumC 5)))
-         (list (FundefC 'dec-if-pos '(x)
-                        (Ifleq0C (idC 'x)
-                                 (idC 'x)
-                                 (BinOp '- (idC 'x) (NumC 1)))))
-         mt-env)
- 4)
-
-(check-equal?
- (interp (appC 'dec-if-pos (list (NumC -2)))
-         (list (FundefC 'dec-if-pos  '(x)
-                        (Ifleq0C (idC 'x)
-                                 (idC 'x)
-                                 (BinOp '- (idC 'x) (NumC 1)))))
-         mt-env)
- -2)
 
 (check-exn #rx"VEBG-parse-fundef: expected valid syntax"
            (lambda () (parse-fundef '())))
@@ -319,18 +291,6 @@
  2)
 
 (check-exn
- #rx"VEBG-parse-fundef: expected valid syntax:\n\\{named-fn f \\(args\\) -> \\{body\\}\\}, got"
- (λ ()
-   (parse-fundef '())))
-(check-exn
- #rx"VEBG-parse-fundef: expected valid syntax:\n\\{named-fn f \\(args\\) -> \\{body\\}\\}, got"
- (λ ()
-   (parse-fundef '{named-fn f x -> x})))
-(check-exn
- #rx"VEBG-parse-fundef: expected valid syntax:\n\\{named-fn f \\(args\\) -> \\{body\\}\\}, got"
- (λ ()
-   (parse-fundef '/)))
-(check-exn
  #rx"VEBG-BinopTableDiv: cannot divide by zero"
  (λ ()
    (top-interp
@@ -353,12 +313,6 @@
  #rx"VEBG-parse"
  (λ ()
    (parse '{named-fn 1 () -> 5})))
-(check-exn
- #rx"VEBG-get-fundef"
- (λ ()
-   (interp-fns
-    (parse-prog
-     '{{named-fn f () -> 5}}))))
 
 (check-equal?
  (parse '{* 3 4})
@@ -379,32 +333,3 @@
  #rx"VEBG-parse-prog"
  (λ ()
    (parse-prog 42)))
-(check-exn
- #rx"VEBG-interp-fns.*main must have no arguments"
- (λ ()
-   (interp-fns
-    (parse-prog
-     '{{named-fn main (x) -> x}}))))
-
-(check-exn
- #rx"VEBG-parse-fundef: duplicate parameter names"
- (λ ()
-   (parse-fundef '{named-fn f (x x) -> (+ x x)})))
-
-(check-exn
- #rx"VEBG-parse-fundef: invalid function name"
- (λ ()
-   (parse-fundef '{named-fn + (x) -> x})))
-
-(check-exn
- #rx"VEBG-parse-fundef: invalid parameter name"
- (λ ()
-   (parse-fundef '{named-fn f (x ifleq0?) -> x})))
-
-(check-exn
- #rx"VEBG-parse-prog: duplicate function names"
- (λ ()
-   (parse-prog
-    '{{named-fn f () -> 1}
-      {named-fn f () -> 2}
-      {named-fn main () -> 0}})))

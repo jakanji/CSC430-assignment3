@@ -403,6 +403,17 @@
 ;; AI-CHANGED-FOR-VEBG4: Interpreter and public interface
 ;; ============================================================================
 
+(define (apply-value [fun-val : Value]
+                     [arg-vals : (Listof Value)]
+                     [whole-app : ExprC]) : Value
+  (match fun-val
+    [(CloV params body saved-env)
+     (interp body (bind-params params arg-vals saved-env whole-app))]
+    [(PrimV name) (apply-prim name arg-vals whole-app)]
+    [other
+     (vebg-error 'VEBG-interp
+                 (format "attempted to apply a non-function in ~e, got ~a"
+                         whole-app (serialize other)))]))
 ;; AI-CHANGED-FOR-VEBG4: interp evaluates an ExprC in the given environment.
 (: interp (ExprC Environment -> Value))
 (define (interp [e : ExprC] [env : Environment]) : Value
