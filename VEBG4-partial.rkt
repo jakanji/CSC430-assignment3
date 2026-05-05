@@ -4,7 +4,7 @@
 ;;haven't implemented interp-fns yet
 ;;still using top-interp from lab 3
 
-(define-type ExprC (U NumC BinOp idC FundefC appC Ifleq0C))
+(define-type ExprC (U NumC BinOp idC LamC appC Ifleq0C))
 (struct NumC ([n : Real]) #:transparent)
 (struct BinOp ([op : (U '+ '* '- '/)] [frst : ExprC] [snd : ExprC]) #:transparent)
 (struct idC ([s : Symbol]) #:transparent)
@@ -20,7 +20,7 @@
 (define-type Value (U Real Boolean StrV CloV))
 (struct StrV ([s : String]) #:transparent)
 (struct CloV ([params : (Listof Symbol)] [body : ExprC] [env : Env]) #:transparent)
-(struct FundefC ([arg : (Listof Symbol)] [body : ExprC]) #:transparent)
+(struct LamC ([arg : (Listof Symbol)] [body : ExprC]) #:transparent)
 
 ;;interpretation evaluation for VEBG language
 (define (interp [a : ExprC] [env : Env]) : Value
@@ -33,7 +33,7 @@
                              (lambda ([a : ExprC]) (interp a env))
                              args))
      (apply-val f-val evaluated-args)]
-    [(FundefC params body) (CloV params body env)]
+    [(LamC params body) (CloV params body env)]
     [(BinOp o l r)
      (define l-val (interp l env))
      (define r-val (interp r env))
@@ -107,7 +107,7 @@
     [(list 'ifleq0? tst thn els)
      (Ifleq0C (parse tst) (parse thn) (parse els))]
     [(list 'fn params '-> body)
-     (FundefC (parse-params params) (parse body))]
+     (LamC (parse-params params) (parse body))]
     [(list fun args ...)
      (appC (parse fun) (map parse args))]
     [(? symbol? a) (if (or [eq? a '+]
@@ -174,10 +174,10 @@
 (check-equal? (serialize false) "false")
 
 ;;interp tests
-(check-equal? (interp (BinOp '+ (appC (FundefC '(x y)
+(check-equal? (interp (BinOp '+ (appC (LamC '(x y)
                                                (BinOp '- (idC 'x) (idC 'y)))
                                       (list (NumC 2) (NumC 5)))
-                             (appC (FundefC '(x)
+                             (appC (LamC '(x)
                                             (BinOp '/ (BinOp '* (NumC 2) (idC 'x))
                                                    (NumC 2)))
                                    (list (NumC 10))))
@@ -186,7 +186,7 @@
 
 
 (check-equal? (interp (BinOp '+ (NumC 10)
-                             (appC (FundefC '(x y)
+                             (appC (LamC '(x y)
                                             (BinOp '* (idC 'x) (idC 'y)))
                                    (list (NumC 1) (NumC 2))))
                       mt-env)
