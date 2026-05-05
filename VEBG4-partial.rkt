@@ -71,7 +71,7 @@
 ;; returns a number to bind to the symbol
 (define (lookup [query : Symbol] [env : Env]) : Value
   (match env
-    ['() (error 'VEBG-lookup "name not found: ~e" query)]
+    ['() (error 'VEBG-interp-lookup "name not found: ~e" query)]
     [(cons (Binding name val) rst)
      (cond
        [(symbol=? query name) val]
@@ -92,8 +92,8 @@
     [('() '()) env]
     [((cons f1 r1) (cons f2 r2)) (extend-env (Binding f1 f2)
                                              (match-args r1 r2 env))]
-    [((cons f1 r1) '()) (error 'VEBG-interp "input mismatch, too many arguments: ~e" args )]
-    [('() (cons f2 r2)) (error 'VEBG-interp "input mismatch, not enough arguments: ~e"  params)]))
+    [((cons f1 r1) '()) (error 'VEBG-interp "input mismatch, missing argument(s): ~e" params )]
+    [('() (cons f2 r2)) (error 'VEBG-interp "input mismatch, too many argument(s): ~e"  args)]))
 
 ;;----end interp helper functions -------------------------------------
 
@@ -138,15 +138,16 @@
 ;;---------------------tests----------------------------------------------------------------------------
 
 ;;top-interp tests
-(check-equal? (top-interp '{{fn (x) -> { * 2 x}} 2})
-              "4")
+(check-equal? (top-interp '{{fn (x) -> { - 2 x}} 2})
+              "0")
 (check-equal? (top-interp '{{fn (h) -> {h 8}} {fn (x) -> { + x 1}}})
               "9")
+(check-equal? (top-interp '{{fn () -> {ifleq0? 2 1 0}}}) "0")
 (check-equal? (top-interp '{fn (x) -> {* x x}}) "#<procedure>")
 (check-exn #rx"VEBG-BinopTableDiv: cannot divide by zero"
            (lambda () (top-interp '{{fn () -> {/ 1 0}}})))
-(check-exn #rx"VEBG-parse: params must be a list of symbols: true"
-            (lambda () (top-interp '{{fn (true) -> {/ true 1}} 2})))
+(check-exn #rx"VEBG-parse: params must be a list of symbols: '\\(1\\)"
+            (lambda () (top-interp '{{fn (1) -> {/ 1 1}} 1})))
 
 ;;ifleq0 tests
 (check-equal?
@@ -160,6 +161,12 @@
  (interp (Ifleq0C (NumC 5) (NumC 1) (NumC 2))
          mt-env)
  2)
+
+;;parse tests
+(check-exn #rx"VEBG-parse: invalid id"
+           (lambda () (parse '+)))
+(check-exn #rx"VEBG-parse: expected valid syntax, got #t"
+           (lambda () (parse true))) 
 
 ;;serialize tests
 (check-equal? (serialize 34) "34")
@@ -184,3 +191,19 @@
                                    (list (NumC 1) (NumC 2))))
                       mt-env)
               12)
+(check-exn #rx"VEBG-interp: cannot apply non-function"
+           (lambda () (interp (appC (NumC 3) (list (NumC 4))) mt-env)))
+
+(check-exn #rx"VEBG-interp: input mismatch, too many argument\\(s\\): '\\(3\\)"
+           (lambda () (top-interp '{{fn (x) -> (* x 2)} 2 3})))
+(check-exn #rx"VEBG-interp: input mismatch, missing argument\\(s\\): '\\(z\\)"
+           (lambda () (top-interp '{{fn (x y z) -> (* x 2)} 2 3})))
+
+(check-exn #rx"VEBG-interp: cannot apply non-function: 7"
+           (lambda () (apply-val 7 '())))
+
+(check-exn #rx"VEBG-interp: cannot apply non-function"
+           (lambda () (interp (appC (NumC 3) (list (NumC 4))) mt-env)))
+
+(check-exn #rx"VEBG-interp-lookup: name not found: 'missing"
+           (lambda () (lookup 'missing mt-env)))
