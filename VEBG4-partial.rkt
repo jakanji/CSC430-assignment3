@@ -1,6 +1,7 @@
 #lang typed/racket
 
 (require typed/rackunit)
+;;haven't implemented given
 
 (define-type ExprC (U NumC idC StrC LamC IfC appC))
 (struct StrC ([s : String ]) #:transparent)
@@ -30,8 +31,7 @@
                  (Binding 'equal? (PrimV 'equal?))
                  (Binding 'substring (PrimV 'substring))
                  (Binding 'strlen (PrimV 'strlen))
-                 (Binding 'error (PrimV 'error))
-                 (Binding 'given (PrimV 'given))))
+                 (Binding 'error (PrimV 'error))))
 (define mt-env '())
 (define extend-env cons)
 
@@ -123,7 +123,7 @@
 (define (apply-val [fun-val : Value] [args : (Listof Value)]) : Value
   (match fun-val
     [(CloV params body env) (interp body (match-args params args env))]
-    [(PrimV val) (if (eq? args '()) fun-val
+    [(PrimV val) (if (null? args) fun-val
                      (binop val args))]
     [other (error 'VEBG-interp "cannot apply non-function: ~e" other)]))
 
@@ -145,7 +145,8 @@
     [('equal? (list x y)) (match* (x y)
                      [((NumV x) (NumV y)) (BoolV (= x y))]
                      [((StrV x) (StrV y)) (BoolV (equal? x y))]
-                     [((BoolV x) (BoolV y)) (BoolV (equal? x y))])]
+                     [((BoolV x) (BoolV y)) (BoolV (equal? x y))]
+                     [(_ _) (BoolV #f)])]
     [('substring (list str (NumV start) (NumV stop)))
      (match str
        [(StrV s) (apply-substring s start stop)]
@@ -427,3 +428,5 @@
 ;; parse-given-bindings line 228 - non-list bindings sexp
 (check-exn #rx"VEBG-parse: given must contain a list of bindings, got:"
            (lambda () (parse-given-bindings 42 '{given 42 do x})))
+
+(check-equal? (top-interp '{equal? 1 "1"}) "false")
