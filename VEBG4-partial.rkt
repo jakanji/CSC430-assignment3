@@ -128,7 +128,7 @@
     [(? string? s) (StrC s)]
     [(list 'if tst thn els)
      (IfC (parse tst) (parse thn) (parse els))]
-    [(list 'fn params '-> body)
+    [(list 'fn params '-> (? list? body))
      (LamC (parse-params params) (parse body))]
     [(list fun args ...)
      (appC (parse fun) (map parse args))]
@@ -157,6 +157,7 @@
 ;;---------------------tests----------------------------------------------------------------------------
 
 ;;top-interp tests
+(check-equal? (top-interp '{equal? 1 2}) "false")
 (check-equal? (top-interp '{+}) "#<primop>")
 (check-equal? (top-interp '{<= 0 2}) "true")
 (check-equal? (top-interp '{{fn (x) -> {- 2 x}} 2})
