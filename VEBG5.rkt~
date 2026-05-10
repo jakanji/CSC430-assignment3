@@ -35,8 +35,7 @@
                  (Binding 'println (PrimV 'println))
                  (Binding 'read-num (PrimV 'read-num))
                  (Binding 'read-str (PrimV 'read-str))
-                 (Binding 'chain (PrimV 'chain))
-                 (Binding '++ (PrimV '++))))
+                 (Binding 'chain (PrimV 'chain))))
 (define mt-env '())
 (define extend-env cons)
 
@@ -469,12 +468,3 @@
            (lambda () (parse-given-bindings 42 '{given 42 do x})))
 
 (check-equal? (top-interp '{equal? 1 "1"}) "false")
-
-;;++ tests
-#;(
-(check-equal? (top-interp '{++ "hello" "!"}) "\"hello!\"")
-(check-equal? (top-interp '{++ "x is " 10}) "\"x is 10\"")
-(check-equal? (top-interp '{++ "truth is " true}) "\"truth is true\"")
-(check-equal? (top-interp '{++ "a" "b" "c"}) "\"abc\"")
-(check-equal? (top-interp '{++}) "\"\"")
-)
