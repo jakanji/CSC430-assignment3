@@ -33,7 +33,9 @@
                  (Binding 'strlen (PrimV 'strlen))
                  (Binding 'error (PrimV 'error))
                  (Binding 'println (PrimV 'println))
-                 (Binding 'read-num (PrimV 'read-num))))
+                 (Binding 'read-num (PrimV 'read-num))
+                 (Binding 'read-str (PrimV 'read-str))
+                 (Binding 'chain (PrimV 'chain))))
 (define mt-env '())
 (define extend-env cons)
 
@@ -84,7 +86,7 @@
      (define parsed-bindings (parse-given-bindings bindings prog))
      (appC (LamC (map GivenBind-name parsed-bindings) (parse body))
            (map GivenBind-rhs parsed-bindings))]
-    [(list 'given bad-parts ...)
+    [(list 'given bad-parts ...) 
      (error 'VEBG-parse "given must look like {given {[id = expr] ...} do expr}, got: ~e" prog)]
     [(list fun args ...)
      (appC (parse fun) (map parse args))]
@@ -125,7 +127,10 @@
 (define (apply-val [fun-val : Value] [args : (Listof Value)]) : Value
   (match fun-val
     [(CloV params body env) (interp body (match-args params args env))]
-    [(PrimV val) (if (null? args) fun-val
+    [(PrimV val) (if (and (null? args)
+                          (not (eq? val 'read-num))
+                          (not (eq? val 'read-str)))
+                     fun-val
                      (binop val args))]
     [other (error 'VEBG-interp "cannot apply non-function: ~e" other)]))
 
@@ -170,10 +175,28 @@
      (BoolV true)]
     [('read-num '())
      (print '>)
-     (if (string->number (cast (read-line) String))
-     (BoolV true) (BoolV false))]
+     (define input (string->number (cast (read-line) String)))
+     (if (real? input) (NumV (cast input Real)) (error 'VEBG-read-num "input is not a real number"))]
+    [('read-str '())
+     (print '>)
+     (print (read-line))
+     (BoolV true)]
+    [('chain progs)
+     (chain-progs progs)]     
     [(_ _) (error 'VEBG-binop "invalid binary operation: ~e ~e"
                   op args)]))
+
+;;takes a list of expressions, evaluates each, and returns value of the last one
+;;([params : (Listof Symbol)] [body : ExprC] [env : Env])
+(define (chain-progs [progs : (Listof Value)]) : Value
+  (match progs
+    ['() (error 'VEBG-chain "missing expressions: ~e" progs)]
+    [(cons (CloV params body env) '()) 
+     (interp body (match-args params '() env))]
+    [(cons (CloV params body env) rst)
+     (interp body (match-args params '() env))
+     (chain-progs rst)] 
+    [other (error 'VEBG-chain "invalid chain expression(s): ~e" progs)]))
 
 ;;takes a string, a starting number, and ending number and returns a substring
 ;;of the string from the start to stop
