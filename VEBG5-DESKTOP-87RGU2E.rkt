@@ -33,10 +33,7 @@
                  (Binding 'strlen (PrimV 'strlen))
                  (Binding 'error (PrimV 'error))
                  (Binding 'println (PrimV 'println))
-                 (Binding 'read-num (PrimV 'read-num))
-                 (Binding 'read-str (PrimV 'read-str))
-                 (Binding 'chain (PrimV 'chain))
-                 (Binding '++ (PrimV '++))))
+                 (Binding 'read-num (PrimV 'read-num))))
 (define mt-env '())
 (define extend-env cons)
 
@@ -87,7 +84,7 @@
      (define parsed-bindings (parse-given-bindings bindings prog))
      (appC (LamC (map GivenBind-name parsed-bindings) (parse body))
            (map GivenBind-rhs parsed-bindings))]
-    [(list 'given bad-parts ...) 
+    [(list 'given bad-parts ...)
      (error 'VEBG-parse "given must look like {given {[id = expr] ...} do expr}, got: ~e" prog)]
     [(list fun args ...)
      (appC (parse fun) (map parse args))]
@@ -128,10 +125,7 @@
 (define (apply-val [fun-val : Value] [args : (Listof Value)]) : Value
   (match fun-val
     [(CloV params body env) (interp body (match-args params args env))]
-    [(PrimV val) (if (and (null? args)
-                          (not (eq? val 'read-num))
-                          (not (eq? val 'read-str)))
-                     fun-val
+    [(PrimV val) (if (null? args) fun-val
                      (binop val args))]
     [other (error 'VEBG-interp "cannot apply non-function: ~e" other)]))
 
@@ -172,37 +166,14 @@
                 [(StrV a) a]
                 [(PrimV a) a]
                 [other (error 'VEBG-println
-                              "cannot print value: ~e" other)]))
+                              "cannot print value: ~e")]))
      (BoolV true)]
     [('read-num '())
      (print '>)
-     (define input (string->number (cast (read-line) String)))
-     (if (real? input) (NumV (cast input Real)) (error 'VEBG-read-num "input is not a real number"))]
-    [('read-str '())
-     (print '>)
-     (print (read-line))
-     (BoolV true)]
-    [('chain progs)
-     (chain-progs progs)]
-    [('++ args)
-     (StrV (apply string-append (map (lambda (a) : String (match a
-                                                   [(StrV s) s]
-                                                   [(NumV n) (number->string n)]
-                                                   [(BoolV b) (serialize a)])) args)))]  
+     (if (string->number (cast (read-line) String))
+     (BoolV true) (BoolV false))]
     [(_ _) (error 'VEBG-binop "invalid binary operation: ~e ~e"
                   op args)]))
-
-;;takes a list of expressions, evaluates each, and returns value of the last one
-;;([params : (Listof Symbol)] [body : ExprC] [env : Env])
-(define (chain-progs [progs : (Listof Value)]) : Value
-  (match progs
-    [(cons (CloV params body env) '()) 
-     (interp body (match-args params '() env))]
-    [(cons (CloV params body env) rst)
-     (interp body (match-args params '() env))
-     (chain-progs rst)]
-    [(list vals ...) (last vals)]
-    [other (error 'VEBG-chain "invalid chain expression(s): ~e" progs)]))
 
 ;;takes a string, a starting number, and ending number and returns a substring
 ;;of the string from the start to stop
@@ -474,47 +445,3 @@
            (lambda () (parse-given-bindings 42 '{given 42 do x})))
 
 (check-equal? (top-interp '{equal? 1 "1"}) "false")
-
-
- 
-;;match-args - multiple params
-(check-equal? (lookup 'y (match-args '(x y) (list (NumV 1) (NumV 2)) mt-env)) (NumV 2))
-
-;;apply-val 
-(check-exn #rx"VEBG-binop: invalid binary operation"
-           (lambda () (binop 'read-num (list (NumV 1)))))
-(check-exn #rx"VEBG-binop: invalid binary operation"
-           (lambda () (binop 'read-str (list (NumV 1)))))
-
-
-;;equal?
-(check-equal? (binop 'equal? (list (CloV '() (NumC 1) mt-env) (CloV '() (NumC 1) mt-env))) (BoolV #f))
-(check-equal? (binop 'equal? (list (PrimV '+) (PrimV '+))) (BoolV #f))
-(check-equal? (binop 'equal? (list (NumV 1) (BoolV #t))) (BoolV #f))
-
-;;chain-progs]
-(check-equal? (chain-progs (list (NumV 1) (NumV 2) (NumV 3))) (NumV 3))
-;;chain-progs - single non-CloV returns it
-(check-equal? (chain-progs (list (NumV 42))) (NumV 42))
-
-;;println
-(check-equal? (binop 'println (list (NumV 5))) (BoolV #t))
-(check-equal? (binop 'println (list (StrV "hi"))) (BoolV #t))
-(check-equal? (binop 'println (list (BoolV #t))) (BoolV #t))
-(check-equal? (binop 'println (list (PrimV '+))) (BoolV #t))
-;;println - CloV cannot be printed
-(check-exn #rx"VEBG-println"
-           (lambda () (binop 'println (list (CloV '() (NumC 1) mt-env)))))
-
-;;++ tests
-
-(check-equal? (top-interp '{++ "hello" "!"}) "\"hello!\"")
-(check-equal? (top-interp '{++ "x is " 10}) "\"x is 10\"")
-(check-equal? (top-interp '{++ "truth is " true}) "\"truth is true\"")
-(check-equal? (top-interp '{++ "a" "b" "c"}) "\"abc\"")
-
-
-
-;;chain via top-interp 
-(check-equal? (top-interp '{chain {fn () -> 1} {fn () -> 2} {fn () -> 3}}) "3")
-(check-equal? (top-interp '{chain {fn () -> {+ 1 2}}}) "3")
