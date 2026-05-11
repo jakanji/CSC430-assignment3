@@ -191,12 +191,12 @@
 ;;([params : (Listof Symbol)] [body : ExprC] [env : Env])
 (define (chain-progs [progs : (Listof Value)]) : Value
   (match progs
-    ['() (error 'VEBG-chain "missing expressions: ~e" progs)]
     [(cons (CloV params body env) '()) 
      (interp body (match-args params '() env))]
     [(cons (CloV params body env) rst)
      (interp body (match-args params '() env))
-     (chain-progs rst)] 
+     (chain-progs rst)]
+    [(list vals ...) (last vals)]
     [other (error 'VEBG-chain "invalid chain expression(s): ~e" progs)]))
 
 ;;takes a string, a starting number, and ending number and returns a substring
