@@ -180,8 +180,8 @@
      (if (real? input) (NumV (cast input Real)) (error 'VEBG-read-num "input is not a real number"))]
     [('read-str '())
      (print '>)
-     (print (read-line))
-     (BoolV true)]
+     (define input (read-line))
+     (StrV (cond [(string? input) input] [else (error 'VEBG-read-str "input cannot be EOF")]))]
     [('chain progs)
      (chain-progs progs)]
     [('++ args)
@@ -201,8 +201,7 @@
     [(cons (CloV params body env) rst)
      (interp body (match-args params '() env))
      (chain-progs rst)]
-    [(list vals ...) (last vals)]
-    [other (error 'VEBG-chain "invalid chain expression(s): ~e" progs)]))
+    [(list vals ...) (last vals)]))
 
 ;;takes a string, a starting number, and ending number and returns a substring
 ;;of the string from the start to stop
@@ -518,3 +517,69 @@
 ;;chain via top-interp 
 (check-equal? (top-interp '{chain {fn () -> 1} {fn () -> 2} {fn () -> 3}}) "3")
 (check-equal? (top-interp '{chain {fn () -> {+ 1 2}}}) "3")
+
+
+;;Fun game - Dragon Quest!
+(define sample-program
+  '{given ([start = (println "Welcome to Dragon Quest!")]
+                       [player-health = 50]
+                       [dragon-health = 100]
+                       [attack = {fn (amt) -> {chain
+                                               {println "You've dealt 10 dmg"}
+                                               
+                                               {- amt 10}}}]
+                       {heal = {fn (amt) -> {chain
+                                             {println "You've healed 20 health"}
+                                             
+                                             {+ amt 20}}}}
+                       {hurt = {fn (amt) -> {chain
+                                             {println "Dragon attacks! You take 10 dmg."}
+                                             
+                                             {- amt 10}}}}
+                       [current-hp = {fn (input) ->
+                                         {println
+                                          {++ "Current Health: " input}}}]
+                       [current-ehp = {fn (input) ->
+                                          {println
+                                           {++ "Dragon Health: " input}}}]
+                       [options = {fn () ->
+                                      {chain {println "Will you attack, heal, skip, or exit?"}
+                                             {read-str}}}])
+          do {given ([action = {fn (action health enemy-health input) ->
+                                   {if {<= health 0}
+                                       {println "You died..."}
+                                       {if (<= enemy-health 0)
+                                           {println "You win!"}
+                                           {chain {current-hp health}
+                                                  {current-ehp enemy-health}
+                                                  {if (equal? input "attack")
+                                                      {action action health (attack enemy-health) "skip"}
+                                                      {if (equal? input "heal")
+                                                          {action action {heal health} enemy-health "skip"}
+                                                          {if (equal? input "exit")
+                                                              {println "exiting..."}
+                                                              {if (equal? input "skip")
+                                                                  {action action (hurt health) enemy-health "turn"}
+                                                                  {if (equal? input "turn")
+                                                                      {action action health enemy-health {options}}
+                                                                      {chain {println "invalid input, try again!"}
+                                                          {action action health enemy-health {options}}}}}}}}}}}}])
+                    do {chain {current-hp player-health}
+                              {current-ehp dragon-health}
+                              {action action player-health dragon-health {options}}}}})
+;;sample run:
+
+;"Welcome to Dragon Quest!"
+;"Current Health: 10"
+;"Dragon Health: 100"
+;"Will you attack, heal, skip, or exit?"
+;'>attack
+;"Current Health: 10"
+;"Dragon Health: 100"
+;"You've dealt 10 dmg"
+;"Current Health: 10"
+;"Dragon Health: 90"
+;"Dragon attacks! You take 10 dmg."
+;"You died..."
+;- : String
+;"true"
