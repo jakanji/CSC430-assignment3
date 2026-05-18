@@ -9,15 +9,14 @@
 (struct IfC ([test : ExprC] [thn : ExprC] [els : ExprC]) #:transparent)
 (struct appC ([fun : ExprC] [arg : (Listof ExprC)]) #:transparent)
 
-(define-type Value (U NumV BoolV PrimV StrV CloV ArrayV NullV))
-(struct NullV () #:transparent)
+(define-type Value (U NumV BoolV PrimV StrV CloV ArrayV))
 (struct LamC ([arg : (Listof Symbol)] [body : ExprC]) #:transparent)
 (struct NumV ([n : Real]) #:transparent)
 (struct BoolV ([b : Boolean]) #:transparent)
 (struct PrimV ([val : Symbol]) #:transparent)
 (struct StrV ([s : String]) #:transparent)
 (struct CloV ([params : (Listof Symbol)] [body : ExprC] [env : Env]) #:transparent)
-(struct ArrayV ([start : Location] [size : Natural]) #:transparent)
+(struct ArrayV([start : Location] [size : Number]) #:transparent)
 (struct GivenBind ([name : Symbol] [rhs : ExprC]) #:transparent)
 
 (struct Binding ([name : Symbol] [val : Location]) #:transparent)
@@ -34,11 +33,7 @@
                  (Binding 'substring 9)
                  (Binding 'strlen 10)
                  (Binding 'error 11)
-                 (Binding 'chain 12)
-                 (Binding 'make-array 13)
-                 (Binding 'array 14)
-                 (Binding 'aref 15)
-                 (Binding 'aset! 16)))
+                 (Binding 'chain 12)))
 (define mt-env '())
 (define extend-env cons)
 
@@ -67,16 +62,12 @@
           (PrimV 'substring)
           (PrimV 'strlen)
           (PrimV 'error)
-          (PrimV 'chain)
-          (PrimV 'make-array)
-          (PrimV 'array)
-          (PrimV 'aref)
-          (PrimV 'aset!)))
+          (PrimV 'chain)))
   (for ([i (in-naturals 1)]
         [v prims])
     (vector-set! sto i v))
-  ;; index 0 = next free slot (17, after indices 1-16)
-  (vector-set! sto 0 (NumV 17))
+  ;; index 0 = next free slot (13, after indices 1-12)
+  (vector-set! sto 0 (NumV 13))
   sto)
        
 
@@ -93,8 +84,7 @@
     [(PrimV a) "#<primop>"]
     [(BoolV a) (if a "true" "false")]
     [(CloV _ _ _) "#<procedure>"]
-    [(ArrayV _ _) "#<array>"]
-    [(NullV) "null"]))
+    [(ArrayV _ _) "#<array>"]))
 
 ;;interpretation evaluation for VEBG language
 (define (interp [a : ExprC] [env : Env] [sto : Store]) : Value
