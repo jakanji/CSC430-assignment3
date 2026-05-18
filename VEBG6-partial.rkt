@@ -97,7 +97,7 @@
        [(BoolV #t) (interp thn env sto)]
        [(BoolV #f) (interp else env sto)]
        [other (error 'VEBG-interp "if test did not evaluate to a boolean: ~e" other)])]
-    #;[(LamC params body) (CloV params body env)]
+    [(LamC params body) (CloV params body env)]
     [(appC fun args)
      (define f-val (interp fun env sto))
      (define evaluated-args (map
@@ -300,7 +300,6 @@
                                         (Binding 'error 11)
                                         (Binding 'chain 12)))
 
-#;(
 ;;top-interp tests
 (check-exn #rx"function cannot have duplicate parameters: '\\(x x\\)"
  (lambda () (top-interp '{fn (x x) -> 3})))
@@ -318,20 +317,20 @@
             (lambda () (top-interp '{{fn (1) -> {/ 1 1}} 1})))
 (check-exn #rx"VEBG-binop: invalid binary operation: '\\+ \\(list \\(NumV 2\\) \\(PrimV '-\\)\\)"
            (lambda () (top-interp '{ {fn (x y) -> {+ x -}} 2 2})))
- 
- 
+
+
 ;;If tests
 (check-equal?
- (interp (IfC (idC 'true) (NumC 1) (NumC 2)) top-env mt-store)
+ (interp (IfC (idC 'true) (NumC 1) (NumC 2)) top-env (top-store))
  (NumV 1))
 (check-equal?
- (interp (IfC (idC 'false) (NumC 1) (NumC 2)) top-env mt-store)
+ (interp (IfC (idC 'false) (NumC 1) (NumC 2)) top-env (top-store))
  (NumV 2))
 (check-equal?
- (interp (IfC (appC (idC '<=) (list (NumC 0) (NumC 5))) (NumC 1) (NumC 2)) top-env mt-store)
+ (interp (IfC (appC (idC '<=) (list (NumC 0) (NumC 5))) (NumC 1) (NumC 2)) top-env (top-store))
  (NumV 1))
 (check-equal?
- (interp (IfC (appC (idC '<=) (list (NumC 5) (NumC 0))) (NumC 1) (NumC 2)) top-env mt-store)
+ (interp (IfC (appC (idC '<=) (list (NumC 5) (NumC 0))) (NumC 1) (NumC 2)) top-env (top-store))
  (NumV 2))
 ;; if via top-interp
 (check-equal? (top-interp '{if true "yes" "no"}) "\"yes\"")
@@ -339,24 +338,35 @@
 (check-equal? (top-interp '{if {<= 1 2} 10 20}) "10")
 ;; non-boolean test should error
 (check-exn #rx"VEBG-interp: if test did not evaluate to a boolean"
-           (lambda () (interp (IfC (NumC 5) (NumC 1) (NumC 2)) top-env mt-store)))
+           (lambda () (interp (IfC (NumC 5) (NumC 1) (NumC 2)) top-env (top-store))))
 ;; parse guards reserved words
 (check-exn #rx"VEBG-parse: invalid id"
            (lambda () (parse 'if)))
- 
+
+
 ;;parse tests
 (check-exn #rx"VEBG-parse: invalid id"
            (lambda () (parse 'fn)))
 (check-exn #rx"VEBG-parse: expected valid syntax, got #t"
-           (lambda () (parse true))) 
+           (lambda () (parse true)))
  
+;;serialize tests
+(check-equal? (serialize (NumV 34)) "34")
+(check-equal? (serialize (BoolV true)) "true")
+(check-equal? (serialize (BoolV false)) "false")
+
+;;serialize tests
+(check-equal? (serialize (NumV 34)) "34")
+(check-equal? (serialize (BoolV true)) "true")
+(check-equal? (serialize (BoolV false)) "false")
+
 ;;serialize tests
 (check-equal? (serialize (NumV 34)) "34")
 (check-equal? (serialize (BoolV true)) "true")
 (check-equal? (serialize (BoolV false)) "false")
  
 ;;interp tests
-#;(check-equal? (interp (idC '+) top-env mt-store) "+")
+#;(check-equal? (interp (idC '+) top-env (top-store)) "+")
 (check-equal? (interp (appC (idC '+) (list (appC (LamC '(x y)
                                                (appC (idC '-) (list (idC 'x) (idC 'y))))
                                       (list (NumC 2) (NumC 5)))
@@ -366,7 +376,7 @@
                                                                (list (NumC 2) (idC 'x)))
                                                    (NumC 2))))
                                    (list (NumC 10)))))
-                      top-env mt-store)
+                      top-env (top-store))
               (NumV 7))
  
  
@@ -374,10 +384,10 @@
                              (appC (LamC '(x y)
                                             (appC (idC '*) (list (idC 'x) (idC 'y))))
                                    (list (NumC 1) (NumC 2)))))
-                      top-env mt-store)
+                      top-env (top-store))
               (NumV 12))
 (check-exn #rx"VEBG-interp: cannot apply non-function"
-           (lambda () (interp (appC (NumC 3) (list (NumC 4))) top-env mt-store)))
+           (lambda () (interp (appC (NumC 3) (list (NumC 4))) top-env (top-store))))
  
 (check-exn #rx"VEBG-interp: input mismatch, too many argument\\(s\\): \\(list \\(NumV 3\\)\\)"
            (lambda () (top-interp '{{fn (x) -> (* x 2)} 2 3})))
@@ -385,36 +395,27 @@
            (lambda () (top-interp '{{fn (x y z) -> (* x 2)} 2 3})))
  
 (check-exn #rx"VEBG-interp: cannot apply non-function: \\(NumV 7\\)"
-           (lambda () (apply-val (NumV 7) '() mt-store)))
+           (lambda () (apply-val (NumV 7) '() (top-store))))
  
 (check-exn #rx"VEBG-interp: cannot apply non-function"
-           (lambda () (interp (appC (NumC 3) (list (NumC 4))) mt-env mt-store)))
+           (lambda () (interp (appC (NumC 3) (list (NumC 4))) mt-env (top-store))))
  
 (check-exn #rx"VEBG-interp-lookup: name not found: 'missing"
-           (lambda () (lookup 'missing mt-env)))
+           (lambda () (lookup 'missing mt-env (top-store))))
  
 ;;interp - StrC
-(check-equal? (interp (StrC "hello") mt-env mt-store) (StrV "hello"))
+(check-equal? (interp (StrC "hello") mt-env (top-store)) (StrV "hello"))
  
 ;;serialize - StrV
 (check-equal? (serialize (StrV "hello")) "\"hello\"")
  
-;;lookup - skips non-matching binding before finding target
-(check-equal? (lookup 'b (list (Binding 'a (NumV 1)) (Binding 'b (NumV 2)))) (NumV 2))
- 
-;;match-args - both empty returns env unchanged
-(check-equal? (match-args '() '() mt-env) mt-env)
-;;match-args - matching params to args builds correct env
-(check-equal? (match-args '(x) (list (NumV 5)) mt-env)
-              (list (Binding 'x (NumV 5))))
- 
-;;binop - equal? on NumV, StrV, BoolV
-(check-equal? (binop 'equal? (list (NumV 3) (NumV 3)) mt-store) (BoolV #t))
-(check-equal? (binop 'equal? (list (NumV 3) (NumV 4)) mt-store) (BoolV #f))
-(check-equal? (binop 'equal? (list (StrV "a") (StrV "a")) mt-store) (BoolV #t))
-(check-equal? (binop 'equal? (list (StrV "a") (StrV "b")) mt-store) (BoolV #f))
-(check-equal? (binop 'equal? (list (BoolV #t) (BoolV #t)) mt-store) (BoolV #t))
-(check-equal? (binop 'equal? (list (BoolV #t) (BoolV #f)) mt-store) (BoolV #f))
+ ;;binop - equal? on NumV, StrV, BoolV
+(check-equal? (binop 'equal? (list (NumV 3) (NumV 3)) (top-store)) (BoolV #t))
+(check-equal? (binop 'equal? (list (NumV 3) (NumV 4)) (top-store)) (BoolV #f))
+(check-equal? (binop 'equal? (list (StrV "a") (StrV "a")) (top-store)) (BoolV #t))
+(check-equal? (binop 'equal? (list (StrV "a") (StrV "b")) (top-store)) (BoolV #f))
+(check-equal? (binop 'equal? (list (BoolV #t) (BoolV #t)) (top-store)) (BoolV #t))
+(check-equal? (binop 'equal? (list (BoolV #t) (BoolV #f)) (top-store)) (BoolV #f))
  
 ;;parse - string literal
 (check-equal? (parse '"hello") (StrC "hello"))
@@ -429,31 +430,31 @@
 (check-equal? (top-interp '{substring "hello" 1 3}) "\"el\"")
 (check-equal? (top-interp '{substring "hello" 0 0}) "\"\"")
 ;; direct binop calls
-(check-equal? (binop 'substring (list (StrV "racecar") (NumV 0) (NumV 7)) mt-store) (StrV "racecar"))
-(check-equal? (binop 'substring (list (StrV "racecar") (NumV 3) (NumV 6)) mt-store) (StrV "eca"))
+(check-equal? (binop 'substring (list (StrV "racecar") (NumV 0) (NumV 7)) (top-store)) (StrV "racecar"))
+(check-equal? (binop 'substring (list (StrV "racecar") (NumV 3) (NumV 6)) (top-store)) (StrV "eca"))
 ;; stop > string length
 (check-exn #rx"VEBG-substring: stop must be less than string length"
-           (lambda () (binop 'substring (list (StrV "hello") (NumV 0) (NumV 6)) mt-store)))
+           (lambda () (binop 'substring (list (StrV "hello") (NumV 0) (NumV 6)) (top-store))))
 ;; non-integer start
 (check-exn #rx"VEBG-substring: start must be exact non-negative integer: 1.5"
-           (lambda () (binop 'substring (list (StrV "hello") (NumV 1.5) (NumV 3)) mt-store)))
+           (lambda () (binop 'substring (list (StrV "hello") (NumV 1.5) (NumV 3)) (top-store))))
 ;; non-integer stop (same message as start)
 (check-exn #rx"VEBG-substring: start must be exact non-negative integer: 3.5"
-           (lambda () (binop 'substring (list (StrV "hello") (NumV 1) (NumV 3.5)) mt-store)))
+           (lambda () (binop 'substring (list (StrV "hello") (NumV 1) (NumV 3.5)) (top-store))))
 ;; stop before start
 (check-exn #rx"VEBG-substring: stop must come after start"
-           (lambda () (binop 'substring (list (StrV "hello") (NumV 3) (NumV 1)) mt-store)))
+           (lambda () (binop 'substring (list (StrV "hello") (NumV 3) (NumV 1)) (top-store))))
 ;; non-string first argument
 (check-exn #rx"VEBG-substring: first argument must be a string"
-           (lambda () (binop 'substring (list (NumV 5) (NumV 0) (NumV 2)) mt-store)))
+           (lambda () (binop 'substring (list (NumV 5) (NumV 0) (NumV 2)) (top-store))))
  
  
 ;;strlen tests
 (check-equal? (top-interp '{strlen "hello"}) "5")
 (check-equal? (top-interp '{strlen ""}) "0")
-(check-equal? (binop 'strlen (list (StrV "racecar")) mt-store) (NumV 7))
+(check-equal? (binop 'strlen (list (StrV "racecar")) (top-store)) (NumV 7))
 (check-exn #rx"VEBG-strlen: input must be a string: \\(NumV 3\\)"
-           (lambda () (binop 'strlen (list (NumV 3)) mt-store)))
+           (lambda () (binop 'strlen (list (NumV 3)) (top-store))))
  
  
 ;;error tests
@@ -517,5 +518,4 @@
 (check-exn #rx"VEBG-parse: given must contain a list of bindings, got:"
            (lambda () (parse-given-bindings 42 '{given 42 do x})))
  
-(check-equal? (top-interp '{equal? 1 "1"}) "false")w
-)
+(check-equal? (top-interp '{equal? 1 "1"}) "false")
