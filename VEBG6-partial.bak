@@ -32,13 +32,12 @@
                  (Binding 'substring (PrimV 'substring))
                  (Binding 'strlen (PrimV 'strlen))
                  (Binding 'error (PrimV 'error))
-                 (Binding 'println (PrimV 'println))
-                 (Binding 'read-num (PrimV 'read-num))
-                 (Binding 'read-str (PrimV 'read-str))
-                 (Binding 'chain (PrimV 'chain))
-                 (Binding '++ (PrimV '++))))
+                 (Binding 'chain (PrimV 'chain))))
 (define mt-env '())
 (define extend-env cons)
+
+(define-type Location Number)
+(struct Storage ([location : Location] [val : Value]) #:transparent)
 
 ;;takes an s-expression and calles parser and interp
 (: top-interp (Sexp -> String))
@@ -82,12 +81,12 @@
     [(list 'fn (list params ...) '-> body)
      (if (check-duplicates params)
          (error 'VEBG-parse "function cannot have duplicate parameters: ~e" params)
-     (LamC (parse-params params) (parse body)))]
+         (LamC (parse-params params) (parse body)))]
     [(list 'given bindings 'do body)
      (define parsed-bindings (parse-given-bindings bindings prog))
      (appC (LamC (map GivenBind-name parsed-bindings) (parse body))
            (map GivenBind-rhs parsed-bindings))]
-    [(list 'given bad-parts ...) 
+    [(list 'given bad-parts ...)
      (error 'VEBG-parse "given must look like {given {[id = expr] ...} do expr}, got: ~e" prog)]
     [(list fun args ...)
      (appC (parse fun) (map parse args))]
@@ -128,10 +127,7 @@
 (define (apply-val [fun-val : Value] [args : (Listof Value)]) : Value
   (match fun-val
     [(CloV params body env) (interp body (match-args params args env))]
-    [(PrimV val) (if (and (null? args)
-                          (not (eq? val 'read-num))
-                          (not (eq? val 'read-str)))
-                     fun-val
+    [(PrimV val) (if (null? args) fun-val
                      (binop val args))]
     [other (error 'VEBG-interp "cannot apply non-function: ~e" other)]))
 
@@ -165,30 +161,8 @@
        [_ (error 'VEBG-strlen "input must be a string: ~e" str)])]
     [('error (list v))
      (error 'VEBG-error "user-error: ~e" (serialize v))]
-    [('println (list s))
-     (println (match s
-                [(NumV a) a]
-                [(BoolV a) a]
-                [(StrV a) a]
-                [(PrimV a) a]
-                [other (error 'VEBG-println
-                              "cannot print value: ~e" other)]))
-     (BoolV true)]
-    [('read-num '())
-     (print '>)
-     (define input (string->number (cast (read-line) String)))
-     (if (real? input) (NumV (cast input Real)) (error 'VEBG-read-num "input is not a real number"))]
-    [('read-str '())
-     (print '>)
-     (define input (read-line))
-     (StrV (cond [(string? input) input] [else (error 'VEBG-read-str "input cannot be EOF")]))]
     [('chain progs)
      (chain-progs progs)]
-    [('++ args)
-     (StrV (apply string-append (map (lambda (a) : String (match a
-                                                   [(StrV s) s]
-                                                   [(NumV n) (number->string n)]
-                                                   [(BoolV b) (serialize a)])) args)))]  
     [(_ _) (error 'VEBG-binop "invalid binary operation: ~e ~e"
                   op args)]))
 
@@ -473,113 +447,3 @@
            (lambda () (parse-given-bindings 42 '{given 42 do x})))
 
 (check-equal? (top-interp '{equal? 1 "1"}) "false")
-
-
- 
-;;match-args - multiple params
-(check-equal? (lookup 'y (match-args '(x y) (list (NumV 1) (NumV 2)) mt-env)) (NumV 2))
-
-;;apply-val 
-(check-exn #rx"VEBG-binop: invalid binary operation"
-           (lambda () (binop 'read-num (list (NumV 1)))))
-(check-exn #rx"VEBG-binop: invalid binary operation"
-           (lambda () (binop 'read-str (list (NumV 1)))))
-
-
-;;equal?
-(check-equal? (binop 'equal? (list (CloV '() (NumC 1) mt-env) (CloV '() (NumC 1) mt-env))) (BoolV #f))
-(check-equal? (binop 'equal? (list (PrimV '+) (PrimV '+))) (BoolV #f))
-(check-equal? (binop 'equal? (list (NumV 1) (BoolV #t))) (BoolV #f))
-
-;;chain-progs]
-(check-equal? (chain-progs (list (NumV 1) (NumV 2) (NumV 3))) (NumV 3))
-;;chain-progs - single non-CloV returns it
-(check-equal? (chain-progs (list (NumV 42))) (NumV 42))
-
-;;println
-(check-equal? (binop 'println (list (NumV 5))) (BoolV #t))
-(check-equal? (binop 'println (list (StrV "hi"))) (BoolV #t))
-(check-equal? (binop 'println (list (BoolV #t))) (BoolV #t))
-(check-equal? (binop 'println (list (PrimV '+))) (BoolV #t))
-;;println - CloV cannot be printed
-(check-exn #rx"VEBG-println"
-           (lambda () (binop 'println (list (CloV '() (NumC 1) mt-env)))))
-
-;;++ tests
-
-(check-equal? (top-interp '{++ "hello" "!"}) "\"hello!\"")
-(check-equal? (top-interp '{++ "x is " 10}) "\"x is 10\"")
-(check-equal? (top-interp '{++ "truth is " true}) "\"truth is true\"")
-(check-equal? (top-interp '{++ "a" "b" "c"}) "\"abc\"")
-
-
-
-;;chain via top-interp 
-(check-equal? (top-interp '{chain {fn () -> 1} {fn () -> 2} {fn () -> 3}}) "3")
-(check-equal? (top-interp '{chain {fn () -> {+ 1 2}}}) "3")
-
-
-;;Fun game - Dragon Quest!
-(define sample-program
-  '{given ([start = (println "Welcome to Dragon Quest!")]
-                       [player-health = 50]
-                       [dragon-health = 100]
-                       [attack = {fn (amt) -> {chain
-                                               {println "You've dealt 10 dmg"}
-                                               
-                                               {- amt 10}}}]
-                       {heal = {fn (amt) -> {chain
-                                             {println "You've healed 20 health"}
-                                             
-                                             {+ amt 20}}}}
-                       {hurt = {fn (amt) -> {chain
-                                             {println "Dragon attacks! You take 10 dmg."}
-                                             
-                                             {- amt 10}}}}
-                       [current-hp = {fn (input) ->
-                                         {println
-                                          {++ "Current Health: " input}}}]
-                       [current-ehp = {fn (input) ->
-                                          {println
-                                           {++ "Dragon Health: " input}}}]
-                       [options = {fn () ->
-                                      {chain {println "Will you attack, heal, skip, or exit?"}
-                                             {read-str}}}])
-          do {given ([action = {fn (action health enemy-health input) ->
-                                   {if {<= health 0}
-                                       {println "You died..."}
-                                       {if (<= enemy-health 0)
-                                           {println "You win!"}
-                                           {chain {current-hp health}
-                                                  {current-ehp enemy-health}
-                                                  {if (equal? input "attack")
-                                                      {action action health (attack enemy-health) "skip"}
-                                                      {if (equal? input "heal")
-                                                          {action action {heal health} enemy-health "skip"}
-                                                          {if (equal? input "exit")
-                                                              {println "exiting..."}
-                                                              {if (equal? input "skip")
-                                                                  {action action (hurt health) enemy-health "turn"}
-                                                                  {if (equal? input "turn")
-                                                                      {action action health enemy-health {options}}
-                                                                      {chain {println "invalid input, try again!"}
-                                                          {action action health enemy-health {options}}}}}}}}}}}}])
-                    do {chain {current-hp player-health}
-                              {current-ehp dragon-health}
-                              {action action player-health dragon-health {options}}}}})
-;;sample run:
-
-;"Welcome to Dragon Quest!"
-;"Current Health: 10"
-;"Dragon Health: 100"
-;"Will you attack, heal, skip, or exit?"
-;'>attack
-;"Current Health: 10"
-;"Dragon Health: 100"
-;"You've dealt 10 dmg"
-;"Current Health: 10"
-;"Dragon Health: 90"
-;"Dragon attacks! You take 10 dmg."
-;"You died..."
-;- : String
-;"true"

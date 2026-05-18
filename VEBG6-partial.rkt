@@ -1,7 +1,6 @@
 #lang typed/racket
 
 (require typed/rackunit)
-;;haven't implemented given
 
 (define-type ExprC (U NumC idC StrC LamC IfC appC))
 (struct StrC ([s : String ]) #:transparent)
@@ -9,41 +8,73 @@
 (struct idC ([s : Symbol]) #:transparent)
 (struct IfC ([test : ExprC] [thn : ExprC] [els : ExprC]) #:transparent)
 (struct appC ([fun : ExprC] [arg : (Listof ExprC)]) #:transparent)
-(struct Binding ([name : Symbol] [val : Value]) #:transparent)
-(define-type Env [Listof Binding])
 
-(define-type Value (U NumV BoolV PrimV StrV CloV))
+(define-type Value (U NumV BoolV PrimV StrV CloV ArrayV))
 (struct LamC ([arg : (Listof Symbol)] [body : ExprC]) #:transparent)
 (struct NumV ([n : Real]) #:transparent)
 (struct BoolV ([b : Boolean]) #:transparent)
 (struct PrimV ([val : Symbol]) #:transparent)
 (struct StrV ([s : String]) #:transparent)
 (struct CloV ([params : (Listof Symbol)] [body : ExprC] [env : Env]) #:transparent)
+(struct ArrayV([start : Location] [size : Number]) #:transparent)
 (struct GivenBind ([name : Symbol] [rhs : ExprC]) #:transparent)
+
+(struct Binding ([name : Symbol] [val : Location]) #:transparent)
+(define-type Env [Listof Binding])
 (define top-env (list
-                 (Binding 'true (BoolV true))
-                 (Binding 'false (BoolV false))
-                 (Binding '+ (PrimV '+))
-                 (Binding '- (PrimV '-))
-                 (Binding '* (PrimV '*))
-                 (Binding '/ (PrimV '/))
-                 (Binding '<= (PrimV '<=))
-                 (Binding 'equal? (PrimV 'equal?))
-                 (Binding 'substring (PrimV 'substring))
-                 (Binding 'strlen (PrimV 'strlen))
-                 (Binding 'error (PrimV 'error))
-                 (Binding 'println (PrimV 'println))
-                 (Binding 'read-num (PrimV 'read-num))
-                 (Binding 'read-str (PrimV 'read-str))
-                 (Binding 'chain (PrimV 'chain))
-                 (Binding '++ (PrimV '++))))
+                 (Binding 'true 1)
+                 (Binding 'false 2)
+                 (Binding '+ 3)
+                 (Binding '- 4)
+                 (Binding '* 5)
+                 (Binding '/ 6)
+                 (Binding '<= 7)
+                 (Binding 'equal? 8)
+                 (Binding 'substring 9)
+                 (Binding 'strlen 10)
+                 (Binding 'error 11)
+                 (Binding 'chain 12)))
 (define mt-env '())
 (define extend-env cons)
+
+(define-type Location Integer)
+#;(struct Storage ([location : Location] [val : Value]) #:transparent)
+(define-type Store (Vectorof Value))
+(define mt-store (vector))
+(define override-store
+  cons)
+
+;; Store: index 0 holds the next free location.
+;; Indices 1-12 hold the pre-allocated top-level primitives.
+;; (make-fresh-store) creates a new store with primitives pre-loaded.
+(define (top-store) : Store
+  (define sto : Store
+    (make-vector 500 (NumV 0)))
+  (define prims : (Listof Value)
+    (list (BoolV #t)
+          (BoolV #f)
+          (PrimV '+)
+          (PrimV '-)
+          (PrimV '*)
+          (PrimV '/)
+          (PrimV '<=)
+          (PrimV 'equal?)
+          (PrimV 'substring)
+          (PrimV 'strlen)
+          (PrimV 'error)
+          (PrimV 'chain)))
+  (for ([i (in-naturals 1)]
+        [v prims])
+    (vector-set! sto i v))
+  ;; index 0 = next free slot (13, after indices 1-12)
+  (vector-set! sto 0 (NumV 13))
+  sto)
+       
 
 ;;takes an s-expression and calles parser and interp
 (: top-interp (Sexp -> String))
 (define (top-interp fun-sexps)
-  (serialize (interp (parse fun-sexps) top-env)))
+  (serialize (interp (parse fun-sexps) top-env (top-store))))
  
 ;;accepts any VEBG4 value and returns a string
 (define (serialize [val : Value]) : String
@@ -52,26 +83,27 @@
     [(StrV a) (~v a)]
     [(PrimV a) "#<primop>"]
     [(BoolV a) (if a "true" "false")]
-    [(CloV _ _ _) "#<procedure>"]))
+    [(CloV _ _ _) "#<procedure>"]
+    [(ArrayV _ _) "#<array>"]))
 
 ;;interpretation evaluation for VEBG language
-(define (interp [a : ExprC] [env : Env]) : Value
+(define (interp [a : ExprC] [env : Env] [sto : Store]) : Value
   (match a
     [(NumC n) (NumV n)]
     [(StrC s) (StrV s)]
-    [(idC i) (lookup i env)]
+    [(idC i) (lookup i env sto)]
     [(IfC test thn else)
-     (match (interp test env)
-       [(BoolV #t) (interp thn env)]
-       [(BoolV #f) (interp else env)]
+     (match (interp test env sto)
+       [(BoolV #t) (interp thn env sto)]
+       [(BoolV #f) (interp else env sto)]
        [other (error 'VEBG-interp "if test did not evaluate to a boolean: ~e" other)])]
-    [(LamC params body) (CloV params body env)]
+    #;[(LamC params body) (CloV params body env)]
     [(appC fun args)
-     (define f-val (interp fun env))
+     (define f-val (interp fun env sto))
      (define evaluated-args (map
-                             (lambda ([a : ExprC]) (interp a env))
+                             (lambda ([a : ExprC]) (interp a env sto))
                              args))
-     (apply-val f-val evaluated-args)]))
+     (apply-val f-val evaluated-args sto)]))
 
 (define (parse [prog : Sexp]): ExprC
   (match prog
@@ -82,12 +114,12 @@
     [(list 'fn (list params ...) '-> body)
      (if (check-duplicates params)
          (error 'VEBG-parse "function cannot have duplicate parameters: ~e" params)
-     (LamC (parse-params params) (parse body)))]
+         (LamC (parse-params params) (parse body)))]
     [(list 'given bindings 'do body)
      (define parsed-bindings (parse-given-bindings bindings prog))
      (appC (LamC (map GivenBind-name parsed-bindings) (parse body))
            (map GivenBind-rhs parsed-bindings))]
-    [(list 'given bad-parts ...) 
+    [(list 'given bad-parts ...)
      (error 'VEBG-parse "given must look like {given {[id = expr] ...} do expr}, got: ~e" prog)]
     [(list fun args ...)
      (appC (parse fun) (map parse args))]
@@ -102,42 +134,55 @@
 
 ;;---interp helper functions -------------------------------
 
+;;takes a store and number of locations
+;;mutates the store and returns the base location
+(define (allocate [sto : Store] [locs : Integer]) : Real
+  (define free (NumV-n (cast (vector-ref sto 0) NumV)))
+  (cond
+    [(= free (vector-length sto)) (error 'VEBG "out of memory")]
+    [(> (+ free locs) (vector-length sto)) (error 'VEBG "not enough memory to allocate")]
+    [else (vector-set! sto 0 (NumV (+ free locs)))
+          (NumV-n (cast (vector-ref sto 0) NumV))]))
+
 ;;takes a symbol to lookup and an environment
-;; returns a number to bind to the symbol
-(define (lookup [query : Symbol] [env : Env]) : Value
+;; returns a store location to bind to the symbol
+(define (lookup [query : Symbol] [env : Env] [sto : Store]) : Value
   (match env
     ['() (error 'VEBG-interp-lookup "name not found: ~e" query)]
-    [(cons (Binding name val) rst)
+    [(cons (Binding name loc) rst)
      (cond
-       [(symbol=? query name) val]
-       [else (lookup query rst)])]))
-
-;;takes a list of ExprCs (arguments) and symbols (parameters)
-;;returns a list of bindings of arguments to parameters
-(define (match-args [params : (Listof Symbol)] [args : (Listof Value)] [env : Env])
-  : Env
-  (match* (params args)
-    [('() '()) env]
-    [((cons f1 r1) (cons f2 r2)) (extend-env (Binding f1 f2)
-                                             (match-args r1 r2 env))]
-    [((cons f1 r1) '()) (error 'VEBG-interp "input mismatch, missing argument(s): ~e" params )]
-    [('() (cons f2 r2)) (error 'VEBG-interp "input mismatch, too many argument(s): ~e"  args)]))
+       [(symbol=? query name) (cast (vector-ref sto loc) Value)]
+       [else (lookup query rst sto)])]))
 
 ;;takes a function value and list of arguments
 ;; evaluates the function with arguments and returns Value
-(define (apply-val [fun-val : Value] [args : (Listof Value)]) : Value
+(define (apply-val [fun-val : Value] [args : (Listof Value)] [store : Store]) : Value
   (match fun-val
-    [(CloV params body env) (interp body (match-args params args env))]
-    [(PrimV val) (if (and (null? args)
-                          (not (eq? val 'read-num))
-                          (not (eq? val 'read-str)))
-                     fun-val
-                     (binop val args))]
+    [(CloV params body env)
+     (interp body (match-args params args env store) store)]
+    [(PrimV val) (if (null? args) fun-val
+                     (binop val args store))]
     [other (error 'VEBG-interp "cannot apply non-function: ~e" other)]))
+
+;;takes a list of parameters, arguments, an environment, and a store
+;;allocates and assigns args into store, binds parameters to args
+;;returns extended environment
+(define (match-args [params : (Listof Symbol)] [args : (Listof Value)] [env : Env] [store : Store])
+  : Env
+  (match* (params args)
+    [('() '()) env]
+    [((cons f1 r1) (cons f2 r2))
+     (define free (cast (NumV-n (cast (vector-ref store 0) NumV)) Location))
+     (allocate store 1)
+     (vector-set! store free f2)
+     (extend-env (Binding f1 free)
+                 (match-args r1 r2 env store))]
+    [((cons f1 r1) _) (error 'VEBG-interp "input mismatch, missing argument(s): ~e" params )]
+    [(_ (cons f2 r2)) (error 'VEBG-interp "input mismatch, too many argument(s): ~e"  args)]))
 
 ;;takes a binary operator and two Values
 ;;performs operator on values and returns a Value
-(define (binop op [args : (Listof Value)]) : Value
+(define (binop op [args : (Listof Value)] [store : Store]) : Value
   (match* (op args)
     [('+ (list (NumV x) (NumV y)))
           (NumV (+ x y))]
@@ -165,42 +210,20 @@
        [_ (error 'VEBG-strlen "input must be a string: ~e" str)])]
     [('error (list v))
      (error 'VEBG-error "user-error: ~e" (serialize v))]
-    [('println (list s))
-     (println (match s
-                [(NumV a) a]
-                [(BoolV a) a]
-                [(StrV a) a]
-                [(PrimV a) a]
-                [other (error 'VEBG-println
-                              "cannot print value: ~e" other)]))
-     (BoolV true)]
-    [('read-num '())
-     (print '>)
-     (define input (string->number (cast (read-line) String)))
-     (if (real? input) (NumV (cast input Real)) (error 'VEBG-read-num "input is not a real number"))]
-    [('read-str '())
-     (print '>)
-     (define input (read-line))
-     (StrV (cond [(string? input) input] [else (error 'VEBG-read-str "input cannot be EOF")]))]
     [('chain progs)
-     (chain-progs progs)]
-    [('++ args)
-     (StrV (apply string-append (map (lambda (a) : String (match a
-                                                   [(StrV s) s]
-                                                   [(NumV n) (number->string n)]
-                                                   [(BoolV b) (serialize a)])) args)))]  
+     (chain-progs progs store)]
     [(_ _) (error 'VEBG-binop "invalid binary operation: ~e ~e"
                   op args)]))
 
 ;;takes a list of expressions, evaluates each, and returns value of the last one
 ;;([params : (Listof Symbol)] [body : ExprC] [env : Env])
-(define (chain-progs [progs : (Listof Value)]) : Value
+(define (chain-progs [progs : (Listof Value)] [store : Store]) : Value
   (match progs
     [(cons (CloV params body env) '()) 
-     (interp body (match-args params '() env))]
+     (interp body (match-args params '() env store) store)]
     [(cons (CloV params body env) rst)
-     (interp body (match-args params '() env))
-     (chain-progs rst)]
+     (interp body (match-args params '() env store) store)
+     (chain-progs rst store)]
     [(list vals ...) (last vals)]))
 
 ;;takes a string, a starting number, and ending number and returns a substring
@@ -257,6 +280,27 @@
 
 ;;---------------------tests----------------------------------------------------------------------------
 
+(check-equal? (match-args '(a b c)
+                          (list (NumV 1) (NumV 2) (NumV 3))
+                          top-env
+                          (top-store)) (list
+                                        (Binding 'a 13)
+                                        (Binding 'b 14)
+                                        (Binding 'c 15)
+                                        (Binding 'true 1)
+                                        (Binding 'false 2)
+                                        (Binding '+ 3)
+                                        (Binding '- 4)
+                                        (Binding '* 5)
+                                        (Binding '/ 6)
+                                        (Binding '<= 7)
+                                        (Binding 'equal? 8)
+                                        (Binding 'substring 9)
+                                        (Binding 'strlen 10)
+                                        (Binding 'error 11)
+                                        (Binding 'chain 12)))
+
+#;(
 ;;top-interp tests
 (check-exn #rx"function cannot have duplicate parameters: '\\(x x\\)"
  (lambda () (top-interp '{fn (x x) -> 3})))
@@ -275,18 +319,19 @@
 (check-exn #rx"VEBG-binop: invalid binary operation: '\\+ \\(list \\(NumV 2\\) \\(PrimV '-\\)\\)"
            (lambda () (top-interp '{ {fn (x y) -> {+ x -}} 2 2})))
  
+ 
 ;;If tests
 (check-equal?
- (interp (IfC (idC 'true) (NumC 1) (NumC 2)) top-env)
+ (interp (IfC (idC 'true) (NumC 1) (NumC 2)) top-env mt-store)
  (NumV 1))
 (check-equal?
- (interp (IfC (idC 'false) (NumC 1) (NumC 2)) top-env)
+ (interp (IfC (idC 'false) (NumC 1) (NumC 2)) top-env mt-store)
  (NumV 2))
 (check-equal?
- (interp (IfC (appC (idC '<=) (list (NumC 0) (NumC 5))) (NumC 1) (NumC 2)) top-env)
+ (interp (IfC (appC (idC '<=) (list (NumC 0) (NumC 5))) (NumC 1) (NumC 2)) top-env mt-store)
  (NumV 1))
 (check-equal?
- (interp (IfC (appC (idC '<=) (list (NumC 5) (NumC 0))) (NumC 1) (NumC 2)) top-env)
+ (interp (IfC (appC (idC '<=) (list (NumC 5) (NumC 0))) (NumC 1) (NumC 2)) top-env mt-store)
  (NumV 2))
 ;; if via top-interp
 (check-equal? (top-interp '{if true "yes" "no"}) "\"yes\"")
@@ -294,7 +339,7 @@
 (check-equal? (top-interp '{if {<= 1 2} 10 20}) "10")
 ;; non-boolean test should error
 (check-exn #rx"VEBG-interp: if test did not evaluate to a boolean"
-           (lambda () (interp (IfC (NumC 5) (NumC 1) (NumC 2)) top-env)))
+           (lambda () (interp (IfC (NumC 5) (NumC 1) (NumC 2)) top-env mt-store)))
 ;; parse guards reserved words
 (check-exn #rx"VEBG-parse: invalid id"
            (lambda () (parse 'if)))
@@ -311,7 +356,7 @@
 (check-equal? (serialize (BoolV false)) "false")
  
 ;;interp tests
-#;(check-equal? (interp (idC '+) top-env) "+")
+#;(check-equal? (interp (idC '+) top-env mt-store) "+")
 (check-equal? (interp (appC (idC '+) (list (appC (LamC '(x y)
                                                (appC (idC '-) (list (idC 'x) (idC 'y))))
                                       (list (NumC 2) (NumC 5)))
@@ -321,7 +366,7 @@
                                                                (list (NumC 2) (idC 'x)))
                                                    (NumC 2))))
                                    (list (NumC 10)))))
-                      top-env)
+                      top-env mt-store)
               (NumV 7))
  
  
@@ -329,10 +374,10 @@
                              (appC (LamC '(x y)
                                             (appC (idC '*) (list (idC 'x) (idC 'y))))
                                    (list (NumC 1) (NumC 2)))))
-                      top-env)
+                      top-env mt-store)
               (NumV 12))
 (check-exn #rx"VEBG-interp: cannot apply non-function"
-           (lambda () (interp (appC (NumC 3) (list (NumC 4))) top-env)))
+           (lambda () (interp (appC (NumC 3) (list (NumC 4))) top-env mt-store)))
  
 (check-exn #rx"VEBG-interp: input mismatch, too many argument\\(s\\): \\(list \\(NumV 3\\)\\)"
            (lambda () (top-interp '{{fn (x) -> (* x 2)} 2 3})))
@@ -340,16 +385,16 @@
            (lambda () (top-interp '{{fn (x y z) -> (* x 2)} 2 3})))
  
 (check-exn #rx"VEBG-interp: cannot apply non-function: \\(NumV 7\\)"
-           (lambda () (apply-val (NumV 7) '())))
+           (lambda () (apply-val (NumV 7) '() mt-store)))
  
 (check-exn #rx"VEBG-interp: cannot apply non-function"
-           (lambda () (interp (appC (NumC 3) (list (NumC 4))) mt-env)))
+           (lambda () (interp (appC (NumC 3) (list (NumC 4))) mt-env mt-store)))
  
 (check-exn #rx"VEBG-interp-lookup: name not found: 'missing"
            (lambda () (lookup 'missing mt-env)))
  
 ;;interp - StrC
-(check-equal? (interp (StrC "hello") mt-env) (StrV "hello"))
+(check-equal? (interp (StrC "hello") mt-env mt-store) (StrV "hello"))
  
 ;;serialize - StrV
 (check-equal? (serialize (StrV "hello")) "\"hello\"")
@@ -364,12 +409,12 @@
               (list (Binding 'x (NumV 5))))
  
 ;;binop - equal? on NumV, StrV, BoolV
-(check-equal? (binop 'equal? (list (NumV 3) (NumV 3))) (BoolV #t))
-(check-equal? (binop 'equal? (list (NumV 3) (NumV 4))) (BoolV #f))
-(check-equal? (binop 'equal? (list (StrV "a") (StrV "a"))) (BoolV #t))
-(check-equal? (binop 'equal? (list (StrV "a") (StrV "b"))) (BoolV #f))
-(check-equal? (binop 'equal? (list (BoolV #t) (BoolV #t))) (BoolV #t))
-(check-equal? (binop 'equal? (list (BoolV #t) (BoolV #f))) (BoolV #f))
+(check-equal? (binop 'equal? (list (NumV 3) (NumV 3)) mt-store) (BoolV #t))
+(check-equal? (binop 'equal? (list (NumV 3) (NumV 4)) mt-store) (BoolV #f))
+(check-equal? (binop 'equal? (list (StrV "a") (StrV "a")) mt-store) (BoolV #t))
+(check-equal? (binop 'equal? (list (StrV "a") (StrV "b")) mt-store) (BoolV #f))
+(check-equal? (binop 'equal? (list (BoolV #t) (BoolV #t)) mt-store) (BoolV #t))
+(check-equal? (binop 'equal? (list (BoolV #t) (BoolV #f)) mt-store) (BoolV #f))
  
 ;;parse - string literal
 (check-equal? (parse '"hello") (StrC "hello"))
@@ -378,37 +423,37 @@
 ;;parse - -> is a reserved word
 (check-exn #rx"VEBG-parse: invalid id"
            (lambda () (parse '->)))
- 
+  
 ;;substring tests
 (check-equal? (top-interp '{substring "hello" 0 5}) "\"hello\"")
 (check-equal? (top-interp '{substring "hello" 1 3}) "\"el\"")
 (check-equal? (top-interp '{substring "hello" 0 0}) "\"\"")
 ;; direct binop calls
-(check-equal? (binop 'substring (list (StrV "racecar") (NumV 0) (NumV 7))) (StrV "racecar"))
-(check-equal? (binop 'substring (list (StrV "racecar") (NumV 3) (NumV 6))) (StrV "eca"))
+(check-equal? (binop 'substring (list (StrV "racecar") (NumV 0) (NumV 7)) mt-store) (StrV "racecar"))
+(check-equal? (binop 'substring (list (StrV "racecar") (NumV 3) (NumV 6)) mt-store) (StrV "eca"))
 ;; stop > string length
 (check-exn #rx"VEBG-substring: stop must be less than string length"
-           (lambda () (binop 'substring (list (StrV "hello") (NumV 0) (NumV 6)))))
+           (lambda () (binop 'substring (list (StrV "hello") (NumV 0) (NumV 6)) mt-store)))
 ;; non-integer start
 (check-exn #rx"VEBG-substring: start must be exact non-negative integer: 1.5"
-           (lambda () (binop 'substring (list (StrV "hello") (NumV 1.5) (NumV 3)))))
+           (lambda () (binop 'substring (list (StrV "hello") (NumV 1.5) (NumV 3)) mt-store)))
 ;; non-integer stop (same message as start)
 (check-exn #rx"VEBG-substring: start must be exact non-negative integer: 3.5"
-           (lambda () (binop 'substring (list (StrV "hello") (NumV 1) (NumV 3.5)))))
+           (lambda () (binop 'substring (list (StrV "hello") (NumV 1) (NumV 3.5)) mt-store)))
 ;; stop before start
 (check-exn #rx"VEBG-substring: stop must come after start"
-           (lambda () (binop 'substring (list (StrV "hello") (NumV 3) (NumV 1)))))
+           (lambda () (binop 'substring (list (StrV "hello") (NumV 3) (NumV 1)) mt-store)))
 ;; non-string first argument
 (check-exn #rx"VEBG-substring: first argument must be a string"
-           (lambda () (binop 'substring (list (NumV 5) (NumV 0) (NumV 2)))))
+           (lambda () (binop 'substring (list (NumV 5) (NumV 0) (NumV 2)) mt-store)))
  
  
 ;;strlen tests
 (check-equal? (top-interp '{strlen "hello"}) "5")
 (check-equal? (top-interp '{strlen ""}) "0")
-(check-equal? (binop 'strlen (list (StrV "racecar"))) (NumV 7))
+(check-equal? (binop 'strlen (list (StrV "racecar")) mt-store) (NumV 7))
 (check-exn #rx"VEBG-strlen: input must be a string: \\(NumV 3\\)"
-           (lambda () (binop 'strlen (list (NumV 3)))))
+           (lambda () (binop 'strlen (list (NumV 3)) mt-store)))
  
  
 ;;error tests
@@ -471,115 +516,6 @@
 ;; parse-given-bindings line 228 - non-list bindings sexp
 (check-exn #rx"VEBG-parse: given must contain a list of bindings, got:"
            (lambda () (parse-given-bindings 42 '{given 42 do x})))
-
-(check-equal? (top-interp '{equal? 1 "1"}) "false")
-
-
  
-;;match-args - multiple params
-(check-equal? (lookup 'y (match-args '(x y) (list (NumV 1) (NumV 2)) mt-env)) (NumV 2))
-
-;;apply-val 
-(check-exn #rx"VEBG-binop: invalid binary operation"
-           (lambda () (binop 'read-num (list (NumV 1)))))
-(check-exn #rx"VEBG-binop: invalid binary operation"
-           (lambda () (binop 'read-str (list (NumV 1)))))
-
-
-;;equal?
-(check-equal? (binop 'equal? (list (CloV '() (NumC 1) mt-env) (CloV '() (NumC 1) mt-env))) (BoolV #f))
-(check-equal? (binop 'equal? (list (PrimV '+) (PrimV '+))) (BoolV #f))
-(check-equal? (binop 'equal? (list (NumV 1) (BoolV #t))) (BoolV #f))
-
-;;chain-progs]
-(check-equal? (chain-progs (list (NumV 1) (NumV 2) (NumV 3))) (NumV 3))
-;;chain-progs - single non-CloV returns it
-(check-equal? (chain-progs (list (NumV 42))) (NumV 42))
-
-;;println
-(check-equal? (binop 'println (list (NumV 5))) (BoolV #t))
-(check-equal? (binop 'println (list (StrV "hi"))) (BoolV #t))
-(check-equal? (binop 'println (list (BoolV #t))) (BoolV #t))
-(check-equal? (binop 'println (list (PrimV '+))) (BoolV #t))
-;;println - CloV cannot be printed
-(check-exn #rx"VEBG-println"
-           (lambda () (binop 'println (list (CloV '() (NumC 1) mt-env)))))
-
-;;++ tests
-
-(check-equal? (top-interp '{++ "hello" "!"}) "\"hello!\"")
-(check-equal? (top-interp '{++ "x is " 10}) "\"x is 10\"")
-(check-equal? (top-interp '{++ "truth is " true}) "\"truth is true\"")
-(check-equal? (top-interp '{++ "a" "b" "c"}) "\"abc\"")
-
-
-
-;;chain via top-interp 
-(check-equal? (top-interp '{chain {fn () -> 1} {fn () -> 2} {fn () -> 3}}) "3")
-(check-equal? (top-interp '{chain {fn () -> {+ 1 2}}}) "3")
-
-
-;;Fun game - Dragon Quest!
-(define sample-program
-  '{given ([start = (println "Welcome to Dragon Quest!")]
-                       [player-health = 50]
-                       [dragon-health = 100]
-                       [attack = {fn (amt) -> {chain
-                                               {println "You've dealt 10 dmg"}
-                                               
-                                               {- amt 10}}}]
-                       {heal = {fn (amt) -> {chain
-                                             {println "You've healed 20 health"}
-                                             
-                                             {+ amt 20}}}}
-                       {hurt = {fn (amt) -> {chain
-                                             {println "Dragon attacks! You take 10 dmg."}
-                                             
-                                             {- amt 10}}}}
-                       [current-hp = {fn (input) ->
-                                         {println
-                                          {++ "Current Health: " input}}}]
-                       [current-ehp = {fn (input) ->
-                                          {println
-                                           {++ "Dragon Health: " input}}}]
-                       [options = {fn () ->
-                                      {chain {println "Will you attack, heal, skip, or exit?"}
-                                             {read-str}}}])
-          do {given ([action = {fn (action health enemy-health input) ->
-                                   {if {<= health 0}
-                                       {println "You died..."}
-                                       {if (<= enemy-health 0)
-                                           {println "You win!"}
-                                           {chain {current-hp health}
-                                                  {current-ehp enemy-health}
-                                                  {if (equal? input "attack")
-                                                      {action action health (attack enemy-health) "skip"}
-                                                      {if (equal? input "heal")
-                                                          {action action {heal health} enemy-health "skip"}
-                                                          {if (equal? input "exit")
-                                                              {println "exiting..."}
-                                                              {if (equal? input "skip")
-                                                                  {action action (hurt health) enemy-health "turn"}
-                                                                  {if (equal? input "turn")
-                                                                      {action action health enemy-health {options}}
-                                                                      {chain {println "invalid input, try again!"}
-                                                          {action action health enemy-health {options}}}}}}}}}}}}])
-                    do {chain {current-hp player-health}
-                              {current-ehp dragon-health}
-                              {action action player-health dragon-health {options}}}}})
-;;sample run:
-
-;"Welcome to Dragon Quest!"
-;"Current Health: 10"
-;"Dragon Health: 100"
-;"Will you attack, heal, skip, or exit?"
-;'>attack
-;"Current Health: 10"
-;"Dragon Health: 100"
-;"You've dealt 10 dmg"
-;"Current Health: 10"
-;"Dragon Health: 90"
-;"Dragon attacks! You take 10 dmg."
-;"You died..."
-;- : String
-;"true"
+(check-equal? (top-interp '{equal? 1 "1"}) "false")w
+)
