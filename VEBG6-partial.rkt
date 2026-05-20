@@ -111,7 +111,7 @@
     [(LamC params body) (CloV params body env)]
     [(RebC (idC i) arg) (define a (interp arg env sto))
                         (vector-set! sto (env-lookup i env) a)
-                        NullV]     
+                        (NullV)]     
     [(appC fun args)
      (define f-val (interp fun env sto))
      (define evaluated-args (map
@@ -162,7 +162,7 @@
     [found (println (vector-ref store found))
      (vector-set! store found val)
      (println store)
-           NullV]
+           (NullV)]
     [else (error 'VEBG-rebind "value not found: ~e" id)]))
  
 ;;takes a store and number of locations
@@ -257,7 +257,7 @@
     [('make-array (list (NumV size) (NumV val)))
      (cond
        [(< size 1) (error 'VEBG "cannot create array size <1: ~e" size)]
-       [else (ArrayV (allocate store size) size)])]
+       [else (ArrayV (allocate store size) (cast size Natural))])]
     [('array  elements) 
      (cond
        [(< (length elements) 1) (error 'VEBG "cannot create array size <1: ~e" (length elements))]
@@ -276,7 +276,7 @@
        [(or (>= index (cast size Real)) (< index 0))
         (error 'VEBG-aref "array reference out of bounds: ~e" index)]
        [else (vector-set! store (cast (+ start index) Integer) val)
-             NullV]]]
+             (NullV)]]]
              
     [(_ _) (error 'VEBG-binop "invalid binary operation: ~e ~e"
                   op args)]))
