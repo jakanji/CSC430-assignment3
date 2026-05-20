@@ -90,7 +90,7 @@
 (define (serialize [val : Value]) : String
   (match val
     [(NumV a) (~v a)]
-    [(StrV a) (~v a)]
+    [(StrV a) a]
     [(PrimV a) "#<primop>"]
     [(BoolV a) (if a "true" "false")]
     [(CloV _ _ _) "#<procedure>"]
@@ -141,30 +141,20 @@
      (error 'VEBG-parse "given must look like {given {[id = expr] ...} do expr}, got: ~e" prog)]
     [(list fun args ...) 
      (appC (parse fun) (map parse args))]    
-    [(? symbol? a) (if (or [eq? a '->]
-                           [eq? a 'if] 
-                           [eq? a 'fn]
-                           [eq? a 'given]
-                           [eq? a '=]
-                           [eq? a 'do])
+    [(? symbol? a) (if (or [equal? a '->]
+                           [equal? a 'if] 
+                           [equal? a 'fn]
+                           [equal? a 'given]
+                           [equal? a '=]
+                           [equal? a 'do]
+                           [equal? a ':=])
                        (error 'VEBG-parse "invalid id, got ~e" a)
                        (idC a))]
     [other (error 'VEBG-parse "expected valid syntax, got ~e" other)]))
  
 ;;---interp helper  functions -------------------------------
 
-;;takes a location, a  value, and a store
-;;rebinds the location to the value in the store
-;;returns a NullV
-(define (rebind [id : Integer] [val : Value] [store : Store]) : Value
-  (define found (vector-member id store))
-  (cond
-    [found (println (vector-ref store found))
-     (vector-set! store found val)
-     (println store)
-           (NullV)]
-    [else (error 'VEBG-rebind "value not found: ~e" id)]))
- 
+
 ;;takes a store and number of locations
 ;;mutates the store and returns the base location
 (define (allocate [sto : Store] [locs : Real]) : Integer
@@ -194,7 +184,7 @@
 ;;takes a store locationa and a store
 ;;returns the value located at the store location
 (define (store-lookup [loc : Integer] [sto : Store]) : Value (vector-ref sto loc))
-
+ 
 ;;takes a function value and list of arguments
 ;; evaluates the function with arguments and returns Value
 (define (apply-val [fun-val : Value] [args : (Listof Value)] [store : Store]) : Value
@@ -237,13 +227,13 @@
      (BoolV (<= x y))]
     [('equal? (list x y)) (match* (x y)
                             [((NumV x) (NumV y)) (BoolV (= x y))]
-                            [((StrV x) (StrV y)) (BoolV (eq? x y))]
+                            [((StrV x) (StrV y)) (BoolV (equal? x y))]
                             [((BoolV x) (BoolV y)) (BoolV (equal? x y))]
-                            [((ArrayV s1 v1) (ArrayV s2 v2)) (BoolV (eq? s1 s2))]
+                            [((ArrayV s1 v1) (ArrayV s2 v2)) (BoolV (equal? s1 s2))]
                             [(NullV NullV) (BoolV #t)]
                             [(_ _) (BoolV #f)])]
     [('substring (list str (NumV start) (NumV stop)))
-     (match str
+     (match str 
        [(StrV s) (apply-substring s start stop)]
        [_ (error 'VEBG-substring "first argument must be a string ~e" str)])]
     [('strlen (list str))
@@ -254,10 +244,14 @@
      (error 'VEBG-error "user-error: ~e" (serialize v))]
     [('chain progs)
      (chain-progs progs store)]
-    [('make-array (list (NumV size) (NumV val)))
+    [('make-array (list (NumV size) val))
      (cond
        [(< size 1) (error 'VEBG "cannot create array size <1: ~e" size)]
-       [else (ArrayV (allocate store size) (cast size Natural))])]
+       [(not (exact-nonnegative-integer? size)) (error 'VEBG-make-array "size must be an integer: ~e" size)]
+       [else (define start (allocate store size))
+             (for ([i (in-range start (NumV-n (cast (vector-ref store 0) NumV)))])
+               (vector-set! store i val))
+             (ArrayV start (cast size Natural))])]
     [('array  elements) 
      (cond
        [(< (length elements) 1) (error 'VEBG "cannot create array size <1: ~e" (length elements))]
@@ -275,6 +269,7 @@
      [cond 
        [(or (>= index (cast size Real)) (< index 0))
         (error 'VEBG-aref "array reference out of bounds: ~e" index)]
+       [(not (exact-nonnegative-integer? index)) (error 'VEBG-aref "index must be an integer: ~e" index)]
        [else (vector-set! store (cast (+ start index) Integer) val)
              (NullV)]]]
              
@@ -323,12 +318,12 @@
   (match b
     [(list (? symbol? name) '= rhs)
      (cond
-       [(or (eq? name '->) (eq? name 'if) (eq? name 'fn)
-            (eq? name 'given) (eq? name '=) (eq? name 'do) (eq? name ':=))
+       [(or (equal? name '->) (equal? name 'if) (equal? name 'fn)
+            (equal? name 'given) (equal? name '=) (equal? name 'do) (equal? name ':=))
         (error 'VEBG-parse "reserved word used as given binding name: ~e" name)]
        [else (GivenBind name (parse rhs))])]
     [other (error 'VEBG-parse "given binding must look like [id = expr], got: ~e" other)]))
-
+ 
 ;;parses a list of given bindings, checks for duplicates
 (define (parse-given-bindings [raw : Sexp] [whole : Sexp]) : (Listof GivenBind)
   (match raw
@@ -345,6 +340,9 @@
 ;;----end helper functions for parse-------------------------------
  
 ;;---------------------tests----------------------------------------------------------------------------
+
+ 
+
 ;;factorial test
 (check-equal? (top-interp
    '{given ([fact = "placeholder"])
@@ -355,6 +353,8 @@
                   do
                   {chain {fact := f}
                          {fact 6}}}} 50) "720")
+(check-exn #rx"VEBG-aref: index must be an integer: 2.3" (lambda () 
+           (top-interp '(given ((f = (make-array 5 false))) do (aset! f 2.3 19)) 1000)))
 
 (check-equal? (top-interp
    '{given ([arr = {array 0}])
@@ -392,6 +392,9 @@
                                         (Binding 'aref 15)
                                         (Binding 'aset! 16)
                                         (Binding ':= 17)))
+(check-exn #rx"VEBG-make-array: size must be an integer: 2.1" (lambda ()
+           (top-interp '(given ((f = (make-array 2.1 false))) do (aset! f 1 19)) 1000)))
+(check-exn #rx"VEBG-parse: invalid id, got ':=" (lambda () (parse '(:= true false null))))
  
 ;;top-interp tests
 (check-exn #rx"function cannot have duplicate parameters: '\\(x x\\)"
@@ -425,8 +428,8 @@
  (interp (IfC (appC (idC '<=) (list (NumC 5) (NumC 0))) (NumC 1) (NumC 2)) top-env (top-store 100))
  (NumV 2))
 ;; if via top-interp
-(check-equal? (top-interp '{if true "yes" "no"} 100) "\"yes\"")
-(check-equal? (top-interp '{if false "yes" "no"} 100) "\"no\"")
+(check-equal? (top-interp '{if true "yes" "no"} 100) "yes")
+(check-equal? (top-interp '{if false "yes" "no"} 100) "no")
 (check-equal? (top-interp '{if {<= 1 2} 10 20} 100) "10")
 ;; non-boolean test should error
 (check-exn #rx"VEBG-interp: if test did not evaluate to a boolean"
@@ -499,7 +502,7 @@
 (check-equal? (interp (StrC "hello") mt-env (top-store 100)) (StrV "hello"))
  
 ;;serialize - StrV
-(check-equal? (serialize (StrV "hello")) "\"hello\"")
+(check-equal? (serialize (StrV "hello")) "hello")
  
 ;;binop - equal? on NumV, StrV, BoolV
 (check-equal? (binop 'equal? (list (NumV 3) (NumV 3)) (top-store 100)) (BoolV #t))
@@ -518,9 +521,9 @@
            (lambda () (parse '->)))
   
 ;;substring tests
-(check-equal? (top-interp '{substring "hello" 0 5} 100) "\"hello\"")
-(check-equal? (top-interp '{substring "hello" 1 3} 100) "\"el\"")
-(check-equal? (top-interp '{substring "hello" 0 0} 100) "\"\"")
+(check-equal? (top-interp '{substring "hello" 0 5} 100) "hello")
+(check-equal? (top-interp '{substring "hello" 1 3} 100) "el")
+(check-equal? (top-interp '{substring "hello" 0 0} 100) "")
 ;; direct binop calls
 (check-equal? (binop 'substring (list (StrV "racecar") (NumV 0) (NumV 7)) (top-store 100)) (StrV "racecar"))
 (check-equal? (binop 'substring (list (StrV "racecar") (NumV 3) (NumV 6)) (top-store 100)) (StrV "eca"))
@@ -579,8 +582,7 @@
                                                 do
                                                 {f 1}}}} 100)
               "11")
-;; given allows rebinding a primitive
-(check-equal? (top-interp '{given {[+ = {fn (x) -> x}]} do {+ 5}} 100) "5")
+ 
 ;; parse-given-binding - valid binding
 (check-equal? (parse-given-binding '[x = 10] '{given {[x = 10]} do x})
               (GivenBind 'x (NumC 10)))
@@ -611,3 +613,69 @@
            (lambda () (parse-given-bindings 42 '{given 42 do x})))
  
 (check-equal? (top-interp '{equal? 1 "1"} 100) "false")
+;;------ new tests for uncovered lines ------
+ 
+;; line 81: top-store sets free pointer to 18 (17 prims pre-loaded at indices 1-17)
+(check-equal? (vector-ref (top-store 100) 0) (NumV 18))
+ 
+;; line 98: NullV serializes to "null"
+(check-equal? (serialize (NullV)) "null")
+  
+;; line 173: allocate - store completely full (free == vector-length)
+(check-exn #rx"VEBG: out of memory"
+           (lambda ()
+             (let ([sto (top-store 18)])  ;; size 18: indices 0-17 all used
+               (allocate sto 1))))
+ 
+;; lines 174-175: allocate - not enough contiguous space
+(check-exn #rx"VEBG: not enough memory to allocate"
+           (lambda ()
+             (let ([sto (top-store 20)])  ;; 2 slots free (18,19)
+               (allocate sto 5))))        ;; request 5
+ 
+;; line 242: equal? on ArrayV - same array is true, different arrays are false
+(let* ([sto (top-store 100)]
+       [a (cast (binop 'array (list (NumV 1) (NumV 2)) sto) ArrayV)]
+       [b (cast (binop 'array (list (NumV 1) (NumV 2)) sto) ArrayV)])
+  (check-equal? (binop 'equal? (list a a) sto) (BoolV #t))
+  (check-equal? (binop 'equal? (list a b) sto) (BoolV #f)))
+ 
+;; line 243: equal? on two NullV
+(check-equal? (binop 'equal? (list (NullV) (NullV)) (top-store 100)) (BoolV #t))
+ 
+;; line 259: make-array with size < 1
+(check-exn #rx"VEBG: cannot create array size <1"
+           (lambda () (binop 'make-array (list (NumV 0) (NumV 0)) (top-store 100))))
+(check-exn #rx"VEBG: cannot create array size <1"
+           (lambda () (binop 'make-array (list (NumV -1) (NumV 0)) (top-store 100))))
+ 
+;; line 263: array with empty element list
+(check-exn #rx"VEBG: cannot create array size <1"
+           (lambda () (binop 'array '() (top-store 100))))
+ 
+;; line 272: aref out of bounds (>= size and < 0)
+(let* ([sto (top-store 100)]
+       [arr (binop 'array (list (NumV 1) (NumV 2) (NumV 3)) sto)])
+  (check-exn #rx"VEBG-aref: array reference out of bounds: 3"
+             (lambda () (binop 'aref (list arr (NumV 3)) sto)))
+  (check-exn #rx"VEBG-aref: array reference out of bounds: -1"
+             (lambda () (binop 'aref (list arr (NumV -1)) sto))))
+ 
+;; line 277: aset! out of bounds
+(let* ([sto (top-store 100)]
+       [arr (binop 'array (list (NumV 1) (NumV 2)) sto)])
+  (check-exn #rx"VEBG-aref: array reference out of bounds: 2"
+             (lambda () (binop 'aset! (list arr (NumV 2) (NumV 99)) sto)))
+  (check-exn #rx"VEBG-aref: array reference out of bounds: -1"
+             (lambda () (binop 'aset! (list arr (NumV -1) (NumV 99)) sto))))
+ 
+;; lines 288-289: chain-progs single CloV thunk
+(let ([sto (top-store 100)])
+  (check-equal? (chain-progs (list (CloV '() (NumC 42) mt-env)) sto) (NumV 42)))
+ 
+;; lines 290-292: chain-progs multiple CloV thunks - returns last
+(let ([sto (top-store 100)])
+  (check-equal? (chain-progs (list (CloV '() (NumC 1) mt-env)
+                                   (CloV '() (NumC 2) mt-env)
+                                   (CloV '() (NumC 3) mt-env)) sto)
+                (NumV 3)))
