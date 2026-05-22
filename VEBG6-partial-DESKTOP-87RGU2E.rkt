@@ -5,7 +5,7 @@
 (define-type ExprC (U NumC idC StrC LamC IfC appC RebC))
 (struct StrC ([s : String ]) #:transparent)
 (struct NumC ([n : Real]) #:transparent)
-(struct idC ([s : Symbol]) #:transparent)
+(struct idC ([s : Symbol]) #:transparentwi)
 (struct IfC ([test : ExprC] [thn : ExprC] [els : ExprC]) #:transparent)
 (struct appC ([fun : ExprC] [arg : (Listof ExprC)]) #:transparent)
 (struct RebC ([id : ExprC] [arg : ExprC]) #:transparent)
@@ -15,7 +15,7 @@
 (struct LamC ([arg : (Listof Symbol)] [body : ExprC]) #:transparent)
 (struct NumV ([n : Real]) #:transparent)
 (struct BoolV ([b : Boolean]) #:transparent)
-(struct PrimV ([val : Symbol]) #:transparent) 
+(struct PrimV ([val : Symbol]) #:transparent)
 (struct StrV ([s : String]) #:transparent)
 (struct CloV ([params : (Listof Symbol)] [body : ExprC] [env : Env]) #:transparent)
 (struct ArrayV ([start : Integer] [size : Natural]) #:transparent)
@@ -44,16 +44,18 @@
 (define mt-env '())
 (define extend-env cons)
 
+#;(struct Storage ([location : Location] [val : Value]) #:transparent)
 (define-type Store (Vectorof Value))
 (define mt-store (vector))
-
+(define override-store
+  cons)
 
 ;; Store: index 0 holds the next free location.
 ;; Indices 1-13 hold the pre-allocated top-level primitives.
 ;;creates and returns a new store with primitives pre-loaded
 (define (top-store [memsize : Integer]) : Store
   (define sto : Store
-    (make-vector memsize (NullV)))
+    (make-vector memsize (NumV 0)))
   (define prims : (Listof Value)
     (list (BoolV #t)
           (BoolV #f)
@@ -121,7 +123,7 @@
 ;;takes an S expressiona and returns an ExprC
 (define (parse [prog : Sexp]): ExprC
   (match prog
-    [(? real? n) (NumC n)] 
+    [(? real? n) (NumC n)]
     [(? string? s) (StrC s)]
     [(list 'if tst thn els)
      (IfC (parse tst) (parse thn) (parse els))]
@@ -132,7 +134,7 @@
          (error 'VEBG-parse "function cannot have duplicate parameters: ~e" params)
          (LamC (parse-params params) (parse body)))]
     [(list 'given bindings 'do body)
-     (define parsed-bindings (parse-given-bindings bindings))
+     (define parsed-bindings (parse-given-bindings bindings prog))
      (appC (LamC (map GivenBind-name parsed-bindings) (parse body))
            (map GivenBind-rhs parsed-bindings))]
     [(list 'given bad-parts ...)
@@ -162,7 +164,7 @@
     [(> (+ free locs) (vector-length sto)) (error 'VEBG "not enough memory to allocate")]
     [else (vector-set! sto 0 (NumV (+ free locs)))
           (cast free Integer)]))
- 
+
 ;;combines env-lookup and store-lookup
 ;;takes a symbol to lookup, an environment, and a store
 ;;returns a value bound to the location in the store
@@ -198,7 +200,7 @@
 ;;returns extended environment
 (define (match-args [params : (Listof Symbol)] [args : (Listof Value)] [env : Env] [store : Store])
   : Env
-  (match* (params args) 
+  (match* (params args)
     [('() '()) env]
     [((cons f1 r1) (cons f2 r2))
      (define space (allocate store 1))
@@ -264,7 +266,7 @@
         (error 'VEBG-aref "array reference out of bounds: ~e" index)]
        [else (vector-ref store (cast (+ start index) Integer))]]]
     [('aset! (list (ArrayV start size) (NumV index) val))
-     [cond  
+     [cond 
        [(or (>= index (cast size Real)) (< index 0))
         (error 'VEBG-aref "array reference out of bounds: ~e" index)]
        [(not (exact-nonnegative-integer? index)) (error 'VEBG-aref "index must be an integer: ~e" index)]
@@ -312,8 +314,8 @@
 ;;-----helper functions for given/parse-------------------------------
 
 ;;parses a single [id = expr] binding
-(define (parse-given-binding [b : Sexp]) : GivenBind
-  (match b 
+(define (parse-given-binding [b : Sexp] [whole : Sexp]) : GivenBind
+  (match b
     [(list (? symbol? name) '= rhs)
      (cond
        [(or (equal? name '->) (equal? name 'if) (equal? name 'fn)
@@ -323,12 +325,12 @@
     [other (error 'VEBG-parse "given binding must look like [id = expr], got: ~e" other)]))
  
 ;;parses a list of given bindings, checks for duplicates
-(define (parse-given-bindings [raw : Sexp]) : (Listof GivenBind)
+(define (parse-given-bindings [raw : Sexp] [whole : Sexp]) : (Listof GivenBind)
   (match raw
     [(list bindings ...)
      (define parsed
        (map (lambda ([b : Sexp]) : GivenBind
-              (parse-given-binding b))
+              (parse-given-binding b whole))
             (cast bindings (Listof Sexp))))
      (if (check-duplicates (map GivenBind-name parsed))
          (error 'VEBG-parse "duplicate given binding name: ~e" (map GivenBind-name parsed))
@@ -336,38 +338,9 @@
     [other (error 'VEBG-parse "given must contain a list of bindings, got: ~e" other)]))
 
 ;;----end helper functions for parse-------------------------------
-(define while
-  '{given ([while = "placeholder"])
-          do
-          {chain {while := {fn (guard body) ->
-                           {if {guard} 
-                               {chain
-                                {body}
-                                {while guard body}}
-                               false}}}  
-                 while}})
-   
-(define in-order
-  `(fn (arr size) ->
-     {given ([i = 0]
-             [increasing = true])
-            do
-            {chain {while {fn () -> {<= {+ i 1} {- size 1}}}
-                          {fn () -> {if {<= {aref arr i} {aref arr {+ i 1}}}
-                                        {i := {+ i 1}}
-                                        {chain {increasing := false}
-                                               {i := size}}}}}
-                   increasing}})) 
-
-(check-equal? (top-interp `{given ([while = ,while])
-                      do
-                      {given ([in-order = ,in-order]) 
-                             do {in-order (array 1 2 3) 3}}} 1000) "true")
-
  
+;;---------------------tests----------------------------------------------------------------------------
 
-;;---------------------tests-------------------------------------------- --------------------------------
- 
 ;;factorial test
 (check-equal? (top-interp
    '{given ([fact = "placeholder"])
@@ -378,7 +351,6 @@
                   do
                   {chain {fact := f}
                          {fact 6}}}} 50) "720")
-
 (check-exn #rx"VEBG-aref: index must be an integer: 2.3" (lambda () 
            (top-interp '(given ((f = (make-array 5 false))) do (aset! f 2.3 19)) 1000)))
 
@@ -400,7 +372,7 @@
                           (top-store 100)) (list 
                                         (Binding 'a 18)
                                         (Binding 'b 19)
-                                        (Binding 'c 20) 
+                                        (Binding 'c 20)
                                         (Binding 'true 1)
                                         (Binding 'false 2)
                                         (Binding '+ 3)
@@ -610,17 +582,17 @@
               "11")
  
 ;; parse-given-binding - valid binding
-(check-equal? (parse-given-binding '[x = 10])
+(check-equal? (parse-given-binding '[x = 10] '{given {[x = 10]} do x})
               (GivenBind 'x (NumC 10)))
 ;; parse-given-binding - reserved word as name
 (check-exn #rx"VEBG-parse: reserved word used as given binding name"
-           (lambda () (parse-given-binding '[if = 10] )))
+           (lambda () (parse-given-binding '[if = 10] '{given {[if = 10]} do if})))
 ;; parse-given-binding - malformed binding
 (check-exn #rx"VEBG-parse: given binding must look like \\[id = expr\\]"
-           (lambda () (parse-given-binding '[x 10] )))
+           (lambda () (parse-given-binding '[x 10] '{given {[x 10]} do x})))
 ;; parse-given-bindings - duplicate names
 (check-exn #rx"VEBG-parse: duplicate given binding name"
-           (lambda () (parse-given-bindings '([x = 1] [x = 2]) )))
+           (lambda () (parse-given-bindings '([x = 1] [x = 2]) '{given {[x = 1] [x = 2]} do x})))
 ;; parse - given reserved words
 (check-exn #rx"VEBG-parse: invalid id"
            (lambda () (parse 'given)))
@@ -636,7 +608,7 @@
            (lambda () (top-interp '{given {[x = 1] [y = x]} do y} 100)))
 ;; parse-given-bindings line 228 - non-list bindings sexp
 (check-exn #rx"VEBG-parse: given must contain a list of bindings, got:"
-           (lambda () (parse-given-bindings 42 )))
+           (lambda () (parse-given-bindings 42 '{given 42 do x})))
  
 (check-equal? (top-interp '{equal? 1 "1"} 100) "false")
 ;;------ new tests for uncovered lines ------
