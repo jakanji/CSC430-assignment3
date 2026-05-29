@@ -19,9 +19,13 @@
 
 (struct TBinding ([id : Symbol] [ty : Type]) #:transparent)
 (define-type TEnv [Listof TBinding])
-(define base-tenv '())
+(define base-tenv (list
+                   [TBinding '+ (FunT (list (NumT) (NumT)) (NumT))]
+                   [TBinding '* (FunT (list (NumT) (NumT)) (NumT))]
+                   [TBinding '- (FunT (list (NumT) (NumT)) (NumT))]
+                   [TBinding '/ (FunT (list (NumT) (NumT)) (NumT))]))
 
-(struct Parameter ([type : Symbol] [val : Symbol]) #:transparent)
+(struct Parameter ([type : Type] [val : Symbol]) #:transparent)
 
 (define-type Value (U NumV BoolV PrimV StrV CloV ArrayV NullV))
 (struct NullV () #:transparent)
@@ -31,7 +35,7 @@
 (struct StrV ([s : String]) #:transparent)
 (struct CloV ([params : (Listof Symbol)] [body : ExprC] [env : Env]) #:transparent)
 (struct ArrayV ([start : Integer] [size : Natural]) #:transparent)
-(struct GivenBind ([type : Symbol] [name : Symbol] [rhs : ExprC]) #:transparent)
+(struct GivenBind ([type : Type] [name : Symbol] [rhs : ExprC]) #:transparent)
 
 (struct Binding ([name : Symbol] [val : Integer]) #:transparent)
 (define-type Env [Listof Binding])
@@ -169,7 +173,7 @@
     ['num (NumT)]
     ['bool (BoolT)]
     ['str (StrT)]
-    [(list (list params ...) ret)
+    [(list (list params ...) '-> ret)
      (FunT (map parse-type params)
            (parse-type ret))]
     [other (error 'VEBG-parse-type "invalid type: ~e" other)]))
@@ -188,8 +192,8 @@
                   BoolT
                   (error 'VEBG-type-check "if cases must match types: ~e ~e:" thn els))]
        [other (error 'VEBG-type-check "if test did not evaluate to a boolean: ~e" other)])]
-    [(LamC (Parameter type params) body)
-     (FunT (map type-check type) (type-check body))]
+    [(LamC (list params ...) body)
+     (FunT (map Parameter-type params) (type-check body (extend-tenv params env)))]  
     [(appC fun args)
      (define f-type (type-check fun env))
      (define arg-types (map
@@ -197,6 +201,14 @@
                         args))
      (FunT arg-types f-type)]))
 
+;;takes a list of Parameters and type environment,
+;;converts params to type bindings and extends environment
+(define (extend-tenv [params : (Listof Parameter)][env : TEnv]) : TEnv
+  (match params
+    ['() env]
+    [(cons (Parameter name type) r) (cons (TBinding type name)
+                                          (extend-tenv r env))]))
+ 
 ;;takes a type and an environment
 ;;looks up the type in the env and returns type
 (define (ty-lookup [i : Symbol] [env : TEnv]) : Type
@@ -362,8 +374,9 @@
 (define (parse-params [params : Sexp]) : (Listof Parameter)
   (match params
     ['() '()]
-    [(cons (list (? symbol? type) ': (? symbol? f)) r) (cons (Parameter type f)
-                                                 (parse-params r))]
+    [(cons (list type ': (? symbol? f)) r)
+     (cons (Parameter (parse-type type) f)
+           (parse-params r))]
     [other (error 'VEBG-parse "params must be a list of symbols: ~e" other)]))
 
 ;;takes a list of bindings, parses for the types and names
@@ -379,7 +392,7 @@
 ;;parses a single [id = expr] binding
 (define (parse-given-binding [b : Sexp]) : GivenBind
   (match b 
-    [(list (? symbol? type) ': (? symbol? name) '= rhs)
+    [(list type ': (? symbol? name) '= rhs)
      (cond
        [(or (equal? type '->) (equal? type 'if) (equal? type 'fn)
             (equal? type 'given) (equal? type '=) (equal? type 'do)
@@ -388,7 +401,7 @@
        [(or (equal? name '->) (equal? name 'if) (equal? name 'fn)
             (equal? name 'given) (equal? name '=) (equal? name 'do) (equal? name ':=))
         (error 'VEBG-parse "reserved word used as given binding name: ~e" name)]
-       [else (GivenBind type name (parse rhs))])]
+       [else (GivenBind (parse-type type) name (parse rhs))])]
     [other (error 'VEBG-parse "given binding must look like [type : id = expr], got: ~e" other)]))
  
 ;;parses a list of given bindings, checks for duplicates
@@ -435,7 +448,10 @@
                              do {in-order (array 1 2 3) 3}}}) "true")
 
 ;;---------------------tests-------------------------------------------- --------------------------------
- 
+
+(check-equal? (Param->TBind (list (Parameter (NumT) 'x) (Parameter (StrT) 'y)))
+              (list (TBinding 'x (NumT)) (TBinding 'y (StrT))))
+
 ;;factorial test
 (check-equal? (top-interp
    '{given ([fact = "placeholder"])
