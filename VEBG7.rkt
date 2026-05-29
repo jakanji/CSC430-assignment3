@@ -9,15 +9,19 @@
 (struct IfC ([test : ExprC] [thn : ExprC] [els : ExprC]) #:transparent)
 (struct appC ([fun : ExprC] [arg : (Listof ExprC)]) #:transparent)
 (struct RebC ([id : ExprC] [arg : ExprC]) #:transparent)
-(struct LamC ([arg : (Listof Symbol)] [body : ExprC]) #:transparent)
+(struct LamC ([arg : (Listof Parameter)] [body : ExprC]) #:transparent)
 
-(define-type Type (U Number Boolean String IfT funT))
-(struct IfT ([tst : Type] [thn : Type] [els : Type]) #:transparent)
-(struct funT ([argT : (Listof Type)] [retT : Type]) #:transparent)
+(define-type Type (U NumT BoolT StrT FunT))
+(struct NumT () #:transparent)
+(struct BoolT () #:transparent)
+(struct StrT () #:transparent)
+(struct FunT ([argT : (Listof Type)] [retT : Type]) #:transparent)
 
 (struct TBinding ([id : Symbol] [ty : Type]) #:transparent)
 (define-type TEnv [Listof TBinding])
 (define base-tenv '())
+
+(struct Parameter ([type : Symbol] [val : Symbol]) #:transparent)
 
 (define-type Value (U NumV BoolV PrimV StrV CloV ArrayV NullV))
 (struct NullV () #:transparent)
@@ -27,7 +31,7 @@
 (struct StrV ([s : String]) #:transparent)
 (struct CloV ([params : (Listof Symbol)] [body : ExprC] [env : Env]) #:transparent)
 (struct ArrayV ([start : Integer] [size : Natural]) #:transparent)
-(struct GivenBind ([name : Symbol] [rhs : ExprC]) #:transparent)
+(struct GivenBind ([type : Symbol] [name : Symbol] [rhs : ExprC]) #:transparent)
 
 (struct Binding ([name : Symbol] [val : Integer]) #:transparent)
 (define-type Env [Listof Binding])
@@ -114,7 +118,7 @@
        [(BoolV #t) (interp thn env sto)]
        [(BoolV #f) (interp else env sto)]
        [other (error 'VEBG-interp "if test did not evaluate to a boolean: ~e" other)])]
-    [(LamC params body) (CloV params body env)]
+    [(LamC (Parameter type params) body) (CloV params body env)]
     [(RebC (idC i) arg) (define a (interp arg env sto))
                         (vector-set! sto (env-lookup i env) a)
                         (NullV)]     
@@ -141,7 +145,7 @@
          (LamC (parse-params params) (parse body)))]
     [(list 'given bindings 'do body)
      (define parsed-bindings (parse-given-bindings bindings))
-     (appC (LamC (map GivenBind-name parsed-bindings) (parse body))
+     (appC (LamC (binding->param parsed-bindings)(parse body))
            (map GivenBind-rhs parsed-bindings))]
     [(list 'given bad-parts ...)
      (error 'VEBG-parse "given must look like {given {[id = expr] ...} do expr}, got: ~e" prog)]
@@ -162,37 +166,46 @@
 ;;takes an Sexp and returns a type
 (define (parse-type [s : Sexp]) : Type
   (match s
-    [(? number? n) n]
-    [(? boolean? b) b]
-    [(? string? s) s]
-    [(list 'if tst thn els) (IfT (parse-type tst)(parse-type thn)(parse-type els))]
-    [(list 'fn (list params ...) ret) (funT (map parse-type params)
-                                 (parse-type ret))]))
+    ['num (NumT)]
+    ['bool (BoolT)]
+    ['str (StrT)]
+    [(list (list params ...) ret)
+     (FunT (map parse-type params)
+           (parse-type ret))]
+    [other (error 'VEBG-parse-type "invalid type: ~e" other)]))
 
 ;;takes a type and type environment
 ;;returns a type if type is correct
 ;;errors otherwise
-(define (type-check [t : Type] [env : TEnv]) : Type
-  (match t
-    [(? number? n) n]
-    [(? symbol? s) (ty-lookup s env)]
-    [(IfT tst thn els) (if (boolean? tst)
-                           (if (equal? thn els)
-                               thn
-                               (error 'VEBG-type-mismatch
-                                      "if cases must have same type: ~e ~e" thn els))
-                           (error 'VEBG-type-mismatch
-                                  "test type must be boolean: ~e" tst))]))
+(define (type-check [exp : ExprC] [env : TEnv]) : Type
+  (match exp
+    [(NumC n) (NumT)]
+    [(idC i) (ty-lookup i env)]
+    [(IfC test thn els)
+     (match (type-check test env)
+       [BoolT (if (equal? (type-check thn env)
+                          (type-check els env))
+                  BoolT
+                  (error 'VEBG-type-check "if cases must match types: ~e ~e:" thn els))]
+       [other (error 'VEBG-type-check "if test did not evaluate to a boolean: ~e" other)])]
+    [(LamC (Parameter type params) body)
+     (FunT (map type-check type) (type-check body))]
+    [(appC fun args)
+     (define f-type (type-check fun env))
+     (define arg-types (map
+                        (lambda ([a : ExprC]) (type-check a env))
+                        args))
+     (FunT arg-types f-type)]))
 
 ;;takes a type and an environment
 ;;looks up the type in the env and returns type
-(define (ty-lookup [t : Type] [env : TEnv]) : Type
+(define (ty-lookup [i : Symbol] [env : TEnv]) : Type
   (match env
-    ['() (error 'VEVG-type-check "type not found: ~e" t)]
+    ['() (error 'VEVG-type-check "type not found: ~e" i)]
     [(cons (TBinding name type) rst)
      (cond
-       [(equal? t name) type]
-       [else (ty-lookup t rst)])]))
+       [(equal? i name) type]
+       [else (ty-lookup i rst)])]))
 
 ;;---interp helper  functions -------------------------------
 
@@ -346,24 +359,37 @@
 ;;-----helper functions for parse----------------------------------
 
 ;;takes an Sexp and returns a list of symbols
-(define (parse-params [params : Sexp]) : (Listof Symbol)
+(define (parse-params [params : Sexp]) : (Listof Parameter)
   (match params
     ['() '()]
-    [(cons (? symbol? f) r) (cons f (parse-params r))]
+    [(cons (list (? symbol? type) ': (? symbol? f)) r) (cons (Parameter type f)
+                                                 (parse-params r))]
     [other (error 'VEBG-parse "params must be a list of symbols: ~e" other)]))
+
+;;takes a list of bindings, parses for the types and names
+;;and returns a list of Parameters
+(define (binding->param [bindings : (Listof GivenBind)]) : (Listof Parameter)
+  (match bindings
+    ['() '()]
+    [(cons fst rst) (cons (Parameter (GivenBind-type fst) (GivenBind-name fst))
+                          (binding->param rst))]))
 
 ;;-----helper functions for given/parse-------------------------------
 
 ;;parses a single [id = expr] binding
 (define (parse-given-binding [b : Sexp]) : GivenBind
   (match b 
-    [(list (? symbol? name) '= rhs)
+    [(list (? symbol? type) ': (? symbol? name) '= rhs)
      (cond
+       [(or (equal? type '->) (equal? type 'if) (equal? type 'fn)
+            (equal? type 'given) (equal? type '=) (equal? type 'do)
+            (equal? type ':=) (equal? type ':))
+        (error 'VEBG-parse "reserved word used as given binding type: ~e" type)]
        [(or (equal? name '->) (equal? name 'if) (equal? name 'fn)
             (equal? name 'given) (equal? name '=) (equal? name 'do) (equal? name ':=))
         (error 'VEBG-parse "reserved word used as given binding name: ~e" name)]
-       [else (GivenBind name (parse rhs))])]
-    [other (error 'VEBG-parse "given binding must look like [id = expr], got: ~e" other)]))
+       [else (GivenBind type name (parse rhs))])]
+    [other (error 'VEBG-parse "given binding must look like [type : id = expr], got: ~e" other)]))
  
 ;;parses a list of given bindings, checks for duplicates
 (define (parse-given-bindings [raw : Sexp]) : (Listof GivenBind)

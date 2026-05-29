@@ -1,7 +1,6 @@
 #lang typed/racket
 
 (require typed/rackunit)
-;;haven't implemented given
 
 (define-type ExprC (U NumC idC StrC LamC IfC appC))
 (struct StrC ([s : String ]) #:transparent)
@@ -34,6 +33,7 @@
                  (Binding 'error (PrimV 'error))))
 (define mt-env '())
 (define extend-env cons)
+(define a 1)
 
 ;;takes an s-expression and calles parser and interp
 (: top-interp (Sexp -> String))
