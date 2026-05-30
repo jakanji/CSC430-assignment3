@@ -77,7 +77,7 @@
     [(list 'fn (list params ...) '-> body)
      (if (check-duplicates params)
          (error 'VEBG-parse "function cannot have duplicate parameters: ~e" params)
-     (LamC (parse-params params) (parse body)))]
+         (LamC (parse-params params) (parse body)))]
     [(list 'given bindings 'do body)
      (define parsed-bindings (parse-given-bindings bindings prog))
      (appC (LamC (map GivenBind-name parsed-bindings) (parse body))
@@ -93,7 +93,8 @@
                            [eq? a '=]
                            [eq? a 'do])
                        (error 'VEBG-parse "invalid id, got ~e" a)
-                       (idC a))][other (error 'VEBG-parse "expected valid syntax, got ~e" other)]))
+                       (idC a))]
+    [other (error 'VEBG-parse "expected valid syntax, got ~e" other)]))
 
 ;;---interp helper functions -------------------------------
 
