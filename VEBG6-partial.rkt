@@ -9,7 +9,7 @@
 (struct IfC ([test : ExprC] [thn : ExprC] [els : ExprC]) #:transparent)
 (struct appC ([fun : ExprC] [arg : (Listof ExprC)]) #:transparent)
 (struct RebC ([id : ExprC] [arg : ExprC]) #:transparent)
-
+ 
 (define-type Value (U NumV BoolV PrimV StrV CloV ArrayV NullV))
 (struct NullV () #:transparent)
 (struct LamC ([arg : (Listof Symbol)] [body : ExprC]) #:transparent)
@@ -76,14 +76,14 @@
         [v prims])
     (vector-set! sto i v))
   ; index 0 = next free slot (18, after indices 1-17)
-  (vector-set! sto 0 (NumV 18))
+  (vector-set! sto (ann 0 Natural) (NumV 18))
   sto)
        
 ;;takes an s-expression and calles parser and interp
 (: top-interp (Sexp Integer -> String))
 (define (top-interp fun-sexps memsize)
   (serialize (interp (parse fun-sexps) top-env (top-store memsize))))
- 
+
 ;;accepts any VEBG4 value and returns a string
 (define (serialize [val : Value]) : String
   (match val
@@ -131,7 +131,7 @@
      (if (check-duplicates params)
          (error 'VEBG-parse "function cannot have duplicate parameters: ~e" params)
          (LamC (parse-params params) (parse body)))]
-    [(list 'given bindings 'do body)
+    [(list 'given (list bindings ...) 'do body)
      (define parsed-bindings (parse-given-bindings bindings))
      (appC (LamC (map GivenBind-name parsed-bindings) (parse body))
            (map GivenBind-rhs parsed-bindings))]
@@ -160,7 +160,7 @@
   (cond
     [(= free (vector-length sto)) (error 'VEBG "out of memory")]
     [(> (+ free locs) (vector-length sto)) (error 'VEBG "not enough memory to allocate")]
-    [else (vector-set! sto 0 (NumV (+ free locs)))
+    [else (vector-set! sto (ann 0 Natural) (NumV (+ free locs)))
           (cast free Integer)]))
  
 ;;combines env-lookup and store-lookup
@@ -189,7 +189,7 @@
   (match fun-val
     [(CloV params body env)
      (interp body (match-args params args env store) store)]
-    [(PrimV val) (if (null? args) fun-val
+    [(PrimV val) (binop val args store) #;(if (null? args) fun-val
                      (binop val args store))]
     [other (error 'VEBG-interp "cannot apply non-function: ~e" other)]))
  
@@ -270,11 +270,11 @@
        [(not (exact-nonnegative-integer? index)) (error 'VEBG-aref "index must be an integer: ~e" index)]
        [else (vector-set! store (cast (+ start index) Integer) val)
              (NullV)]]]
-             
+    
     [(_ _) (error 'VEBG-binop "invalid binary operation: ~e ~e"
                   op args)]))
 
-;;takes a list of expressions, evaluates each, and returns value of the last one
+;;takes a list of expressions, evaluates each, and returns value of the last one 
 ;;([params : (Listof Symbol)] [body : ExprC] [env : Env])
 (define (chain-progs [progs : (Listof Value)] [store : Store]) : Value
   (match progs
@@ -426,7 +426,7 @@
 (check-exn #rx"function cannot have duplicate parameters: '\\(x x\\)"
            (lambda () (top-interp '{fn (x x) -> 3} 100)))
 (check-equal? (top-interp '{equal? 1 2} 100) "false")
-(check-equal? (top-interp '{+} 100) "#<primop>")
+(check-equal? (top-interp '+ 100) "#<primop>")
 (check-equal? (top-interp '{<= 0 2} 100) "true")
 (check-equal? (top-interp '{{fn (x) -> {- 2 x}} 2} 100)
               "0")
@@ -642,7 +642,7 @@
 ;;------ new tests for uncovered lines ------
  
 ;; line 81: top-store sets free pointer to 18 (17 prims pre-loaded at indices 1-17)
-(check-equal? (vector-ref (top-store 100) 0) (NumV 18))
+(check-equal? (vector-ref (top-store 100) (ann 0 Natural)) (NumV 18))
  
 ;; line 98: NullV serializes to "null"
 (check-equal? (serialize (NullV)) "null")

@@ -9,17 +9,33 @@
 (struct IfC ([test : ExprC] [thn : ExprC] [els : ExprC]) #:transparent)
 (struct appC ([fun : ExprC] [arg : (Listof ExprC)]) #:transparent)
 (struct RebC ([id : ExprC] [arg : ExprC]) #:transparent)
+(struct LamC ([arg : (Listof Parameter)] [body : ExprC]) #:transparent)
+
+(define-type Type (U NumT BoolT StrT FunT))
+(struct NumT () #:transparent)
+(struct BoolT () #:transparent)
+(struct StrT () #:transparent)
+(struct FunT ([argT : (Listof Type)] [retT : Type]) #:transparent)
+
+(struct TBinding ([id : Symbol] [ty : Type]) #:transparent)
+(define-type TEnv [Listof TBinding])
+(define base-tenv (list
+                   [TBinding '+ (NumT)]
+                   [TBinding '* (NumT)]
+                   [TBinding '- (NumT)]
+                   [TBinding '/ (NumT)]))
+
+(struct Parameter ([type : Type] [val : Symbol]) #:transparent)
 
 (define-type Value (U NumV BoolV PrimV StrV CloV ArrayV NullV))
 (struct NullV () #:transparent)
-(struct LamC ([arg : (Listof Symbol)] [body : ExprC]) #:transparent)
 (struct NumV ([n : Real]) #:transparent)
 (struct BoolV ([b : Boolean]) #:transparent)
 (struct PrimV ([val : Symbol]) #:transparent) 
 (struct StrV ([s : String]) #:transparent)
 (struct CloV ([params : (Listof Symbol)] [body : ExprC] [env : Env]) #:transparent)
 (struct ArrayV ([start : Integer] [size : Natural]) #:transparent)
-(struct GivenBind ([name : Symbol] [rhs : ExprC]) #:transparent)
+(struct GivenBind ([type : Type] [name : Symbol] [rhs : ExprC]) #:transparent)
 
 (struct Binding ([name : Symbol] [val : Integer]) #:transparent)
 (define-type Env [Listof Binding])
@@ -80,9 +96,9 @@
   sto)
        
 ;;takes an s-expression and calles parser and interp
-(: top-interp (Sexp Integer -> String))
-(define (top-interp fun-sexps memsize)
-  (serialize (interp (parse fun-sexps) top-env (top-store memsize))))
+(: top-interp (Sexp -> String))
+(define (top-interp fun-sexps)
+  (serialize (interp (parse fun-sexps) top-env (top-store 2000))))
  
 ;;accepts any VEBG4 value and returns a string
 (define (serialize [val : Value]) : String
@@ -106,9 +122,9 @@
        [(BoolV #t) (interp thn env sto)]
        [(BoolV #f) (interp else env sto)]
        [other (error 'VEBG-interp "if test did not evaluate to a boolean: ~e" other)])]
-    [(LamC params body) (CloV params body env)]
+    [(LamC (Parameter type params) body) (CloV params body env)]
     [(RebC (idC i) arg) (define a (interp arg env sto))
-                        (vector-set! sto (env-lookup i env) a)
+                        (vector-set! sto (env-lookup i env) a) 
                         (NullV)]     
     [(appC fun args)
      (define f-val (interp fun env sto))
@@ -118,7 +134,7 @@
      (apply-val f-val evaluated-args sto)]))
  
 ;;parses concrete syntax into AST for the language to interpret
-;;takes an S expressiona and returns an ExprC
+;;takes an S expression and returns an ExprC
 (define (parse [prog : Sexp]): ExprC
   (match prog
     [(? real? n) (NumC n)] 
@@ -133,7 +149,7 @@
          (LamC (parse-params params) (parse body)))]
     [(list 'given bindings 'do body)
      (define parsed-bindings (parse-given-bindings bindings))
-     (appC (LamC (map GivenBind-name parsed-bindings) (parse body))
+     (appC (LamC (binding->param parsed-bindings)(parse body))
            (map GivenBind-rhs parsed-bindings))]
     [(list 'given bad-parts ...)
      (error 'VEBG-parse "given must look like {given {[id = expr] ...} do expr}, got: ~e" prog)]
@@ -145,13 +161,67 @@
                            [equal? a 'given]
                            [equal? a '=]
                            [equal? a 'do]
-                           [equal? a ':=])
+                           [equal? a ':=]
+                           [equal? a ':])
                        (error 'VEBG-parse "invalid id, got ~e" a)
                        (idC a))]
     [other (error 'VEBG-parse "expected valid syntax, got ~e" other)]))
  
-;;---interp helper  functions -------------------------------
+;;takes an Sexp and returns a type
+(define (parse-type [s : Sexp]) : Type
+  (match s
+    ['num (NumT)]
+    ['bool (BoolT)]
+    ['str (StrT)]
+    [(list (list params ...) '-> ret)
+     (FunT (map parse-type params)
+           (parse-type ret))]
+    [other (error 'VEBG-parse-type "invalid type: ~e" other)]))
 
+;;takes a type and type environment
+;;returns a type if type is correct
+;;errors otherwise
+(define (type-check [exp : ExprC] [env : TEnv]) : Type
+  (match exp
+    [(NumC n) (NumT)]
+    [(idC i) (ty-lookup i env)]
+    [(IfC test thn els)
+     (match (type-check test env)
+       [BoolT (if (equal? (type-check thn env)
+                          (type-check els env))
+                  BoolT
+                  (error 'VEBG-type-check "if cases must match types: ~e ~e:" thn els))]
+       [other (error 'VEBG-type-check "if test did not evaluate to a boolean: ~e" other)])]
+    [(LamC (list params ...) body)
+     (FunT (map Parameter-type params) (type-check body (extend-tenv params env)))]  
+    [(appC fun args) 
+     (define f-type (type-check fun env))
+     (define arg-types (map
+                        (lambda ([a : ExprC]) (type-check a env))
+                        args))
+     ;;check if arguments' types match param types of f-type
+     (FunT-retT f-type)]))
+
+
+;;takes a list of Parameters and type environment,
+;;converts params to type bindings and extends environment
+(define (extend-tenv [params : (Listof Parameter)][env : TEnv]) : TEnv
+  (match params
+    ['() env]
+    [(cons (Parameter name type) r) (cons (TBinding type name)
+                                          (extend-tenv r env))]))
+ 
+;;takes a type and an environment
+;;looks up the type in the env and returns type
+(define (ty-lookup [i : Symbol] [env : TEnv]) : Type
+  (match env
+    ['() (error 'VEVG-type-check "type not found: ~e" i)]
+    [(cons (TBinding name type) rst)
+     (cond
+       [(equal? i name) type]
+       [else (ty-lookup i rst)])]))
+
+;;---interp helper  functions -------------------------------
 
 ;;takes a store and number of locations
 ;;mutates the store and returns the base location
@@ -303,24 +373,38 @@
 ;;-----helper functions for parse----------------------------------
 
 ;;takes an Sexp and returns a list of symbols
-(define (parse-params [params : Sexp]) : (Listof Symbol)
+(define (parse-params [params : Sexp]) : (Listof Parameter)
   (match params
     ['() '()]
-    [(cons (? symbol? f) r) (cons f (parse-params r))]
+    [(cons (list type ': (? symbol? f)) r)
+     (cons (Parameter (parse-type type) f)
+           (parse-params r))]
     [other (error 'VEBG-parse "params must be a list of symbols: ~e" other)]))
+
+;;takes a list of bindings, parses for the types and names
+;;and returns a list of Parameters
+(define (binding->param [bindings : (Listof GivenBind)]) : (Listof Parameter)
+  (match bindings
+    ['() '()]
+    [(cons fst rst) (cons (Parameter (GivenBind-type fst) (GivenBind-name fst))
+                          (binding->param rst))]))
 
 ;;-----helper functions for given/parse-------------------------------
 
 ;;parses a single [id = expr] binding
 (define (parse-given-binding [b : Sexp]) : GivenBind
   (match b 
-    [(list (? symbol? name) '= rhs)
+    [(list type ': (? symbol? name) '= rhs)
      (cond
+       [(or (equal? type '->) (equal? type 'if) (equal? type 'fn)
+            (equal? type 'given) (equal? type '=) (equal? type 'do)
+            (equal? type ':=) (equal? type ':))
+        (error 'VEBG-parse "reserved word used as given binding type: ~e" type)]
        [(or (equal? name '->) (equal? name 'if) (equal? name 'fn)
             (equal? name 'given) (equal? name '=) (equal? name 'do) (equal? name ':=))
         (error 'VEBG-parse "reserved word used as given binding name: ~e" name)]
-       [else (GivenBind name (parse rhs))])]
-    [other (error 'VEBG-parse "given binding must look like [id = expr], got: ~e" other)]))
+       [else (GivenBind (parse-type type) name (parse rhs))])]
+    [other (error 'VEBG-parse "given binding must look like [type : id = expr], got: ~e" other)]))
  
 ;;parses a list of given bindings, checks for duplicates
 (define (parse-given-bindings [raw : Sexp]) : (Listof GivenBind)
@@ -328,7 +412,7 @@
     [(list bindings ...)
      (define parsed
        (map (lambda ([b : Sexp]) : GivenBind
-              (parse-given-binding b))
+              (parse-given-binding b)) 
             (cast bindings (Listof Sexp))))
      (if (check-duplicates (map GivenBind-name parsed))
          (error 'VEBG-parse "duplicate given binding name: ~e" (map GivenBind-name parsed))
@@ -336,6 +420,10 @@
     [other (error 'VEBG-parse "given must contain a list of bindings, got: ~e" other)]))
 
 ;;----end helper functions for parse-------------------------------
+(check-equal? (type-check (parse '{fn ([num : x] [str : y]) -> {+ 1 x}}) base-tenv)
+                (FunT (list (NumT) (NumT)) (NumT)))
+
+#;(
 (define while
   '{given ([while = "placeholder"])
           do
@@ -362,12 +450,13 @@
 (check-equal? (top-interp `{given ([while = ,while])
                       do
                       {given ([in-order = ,in-order]) 
-                             do {in-order (array 1 2 3) 3}}} 1000) "true")
-
- 
+                             do {in-order (array 1 2 3) 3}}}) "true")
 
 ;;---------------------tests-------------------------------------------- --------------------------------
- 
+
+(check-equal? (Param->TBind (list (Parameter (NumT) 'x) (Parameter (StrT) 'y)))
+              (list (TBinding 'x (NumT)) (TBinding 'y (StrT))))
+
 ;;factorial test
 (check-equal? (top-interp
    '{given ([fact = "placeholder"])
@@ -377,11 +466,11 @@
                                        {* n {fact {- n 1}}}}}])
                   do
                   {chain {fact := f}
-                         {fact 6}}}} 50) "720")
-
+                         {fact 6}}}}) "720") 
+ 
 (check-exn #rx"VEBG-aref: index must be an integer: 2.3" (lambda () 
-           (top-interp '(given ((f = (make-array 5 false))) do (aset! f 2.3 19)) 1000)))
-
+           (top-interp '(given ((f = (make-array 5 false))) do (aset! f 2.3 19)))))
+ 
 (check-equal? (top-interp
    '{given ([arr = {array 0}])
            do
@@ -389,10 +478,10 @@
                                                   {aref arr 0}}}}])
                   do 
                   {chain {f} {f} {f} {f}
-                         {aref arr 0}}}} 100) "4")
+                         {aref arr 0}}}}) "4")
  
 (check-equal? (top-interp '{make-array 2
-                                       2} 100) "#<array>")
+                                       2}) "#<array>")
  
 (check-equal? (match-args '(a b c)
                           (list (NumV 1) (NumV 2) (NumV 3))
@@ -419,26 +508,26 @@
                                         (Binding 'aset! 16)
                                         (Binding ':= 17)))
 (check-exn #rx"VEBG-make-array: size must be an integer: 2.1" (lambda ()
-           (top-interp '(given ((f = (make-array 2.1 false))) do (aset! f 1 19)) 1000)))
+           (top-interp '(given ((f = (make-array 2.1 false))) do (aset! f 1 19)))))
 (check-exn #rx"VEBG-parse: invalid id, got ':=" (lambda () (parse '(:= true false null))))
  
 ;;top-interp tests
 (check-exn #rx"function cannot have duplicate parameters: '\\(x x\\)"
-           (lambda () (top-interp '{fn (x x) -> 3} 100)))
-(check-equal? (top-interp '{equal? 1 2} 100) "false")
-(check-equal? (top-interp '{+} 100) "#<primop>")
-(check-equal? (top-interp '{<= 0 2} 100) "true")
-(check-equal? (top-interp '{{fn (x) -> {- 2 x}} 2} 100)
+           (lambda () (top-interp '{fn (x x) -> 3})))
+(check-equal? (top-interp '{equal? 1 2}) "false")
+(check-equal? (top-interp '{+}) "#<primop>")
+(check-equal? (top-interp '{<= 0 2}) "true")
+(check-equal? (top-interp '{{fn (x) -> {- 2 x}} 2})
               "0")
-(check-equal? (top-interp '{{fn (h) -> {h 8}} {fn (x) -> { + x 1}}} 100)
+(check-equal? (top-interp '{{fn (h) -> {h 8}} {fn (x) -> { + x 1}}})
               "9")
-(check-equal? (top-interp '{fn (x) -> {* x x}} 100) "#<procedure>")
+(check-equal? (top-interp '{fn (x) -> {* x x}}) "#<procedure>")
 (check-exn #rx"VEBG-binop: cannot divide by zero"
-           (lambda () (top-interp '{{fn () -> {/ 1 0}}} 100)))
+           (lambda () (top-interp '{{fn () -> {/ 1 0}}})))
 (check-exn #rx"VEBG-parse: params must be a list of symbols: '\\(1\\)"
-           (lambda () (top-interp '{{fn (1) -> {/ 1 1}} 1} 100)))
+           (lambda () (top-interp '{{fn (1) -> {/ 1 1}} 1})))
 (check-exn #rx"VEBG-binop: invalid binary operation: '\\+ \\(list \\(NumV 2\\) \\(PrimV '-\\)\\)"
-           (lambda () (top-interp '{ {fn (x y) -> {+ x -}} 2 2} 100)))
+           (lambda () (top-interp '{ {fn (x y) -> {+ x -}} 2 2})))
  
 ;;If tests
 (check-equal?
@@ -454,9 +543,9 @@
  (interp (IfC (appC (idC '<=) (list (NumC 5) (NumC 0))) (NumC 1) (NumC 2)) top-env (top-store 100))
  (NumV 2))
 ;; if via top-interp
-(check-equal? (top-interp '{if true "yes" "no"} 100) "yes")
-(check-equal? (top-interp '{if false "yes" "no"} 100) "no")
-(check-equal? (top-interp '{if {<= 1 2} 10 20} 100) "10")
+(check-equal? (top-interp '{if true "yes" "no"}) "yes")
+(check-equal? (top-interp '{if false "yes" "no"}) "no")
+(check-equal? (top-interp '{if {<= 1 2} 10 20}) "10")
 ;; non-boolean test should error
 (check-exn #rx"VEBG-interp: if test did not evaluate to a boolean"
            (lambda () (interp (IfC (NumC 5) (NumC 1) (NumC 2)) top-env (top-store 100))))
@@ -511,9 +600,9 @@
            (lambda () (interp (appC (NumC 3) (list (NumC 4))) top-env (top-store 100))))
  
 (check-exn #rx"VEBG-interp: input mismatch, too many argument\\(s\\): \\(list \\(NumV 3\\)\\)"
-           (lambda () (top-interp '{{fn (x) -> (* x 2)} 2 3} 100)))
+           (lambda () (top-interp '{{fn (x) -> (* x 2)} 2 3})))
 (check-exn #rx"VEBG-interp: input mismatch, missing argument\\(s\\): '\\(z\\)"
-           (lambda () (top-interp '{{fn (x y z) -> (* x 2)} 2 3} 100)))
+           (lambda () (top-interp '{{fn (x y z) -> (* x 2)} 2 3})))
  
 (check-exn #rx"VEBG-interp: cannot apply non-function: \\(NumV 7\\)"
            (lambda () (apply-val (NumV 7) '() (top-store 100))))
@@ -547,9 +636,9 @@
            (lambda () (parse '->)))
   
 ;;substring tests
-(check-equal? (top-interp '{substring "hello" 0 5} 100) "hello")
-(check-equal? (top-interp '{substring "hello" 1 3} 100) "el")
-(check-equal? (top-interp '{substring "hello" 0 0} 100) "")
+(check-equal? (top-interp '{substring "hello" 0 5}) "hello")
+(check-equal? (top-interp '{substring "hello" 1 3}) "el")
+(check-equal? (top-interp '{substring "hello" 0 0}) "")
 ;; direct binop calls
 (check-equal? (binop 'substring (list (StrV "racecar") (NumV 0) (NumV 7)) (top-store 100)) (StrV "racecar"))
 (check-equal? (binop 'substring (list (StrV "racecar") (NumV 3) (NumV 6)) (top-store 100)) (StrV "eca"))
@@ -571,8 +660,8 @@
  
  
 ;;strlen tests
-(check-equal? (top-interp '{strlen "hello"} 100) "5")
-(check-equal? (top-interp '{strlen ""} 100) "0")
+(check-equal? (top-interp '{strlen "hello"}) "5")
+(check-equal? (top-interp '{strlen ""}) "0")
 (check-equal? (binop 'strlen (list (StrV "racecar")) (top-store 100)) (NumV 7))
 (check-exn #rx"VEBG-strlen: input must be a string: \\(NumV 3\\)"
            (lambda () (binop 'strlen (list (NumV 3)) (top-store 100))))
@@ -580,24 +669,24 @@
  
 ;;error tests
 (check-exn #rx"VEBG-error: user-error: \"5\""
-           (lambda () (top-interp '{error 5} 100)))
+           (lambda () (top-interp '{error 5})))
 (check-exn #rx"VEBG-error: user-error: \"true\""
-           (lambda () (top-interp '{error true} 100)))
+           (lambda () (top-interp '{error true})))
 (check-exn #rx"VEBG-error: user-error: \"#<primop>\""
-           (lambda () (top-interp '{error +} 100)))
+           (lambda () (top-interp '{error +})))
 (check-exn #rx"VEBG-error: user-error: \"#<procedure>\""
-           (lambda () (top-interp '{error {fn (x) -> x}} 100)))
+           (lambda () (top-interp '{error {fn (x) -> x}})))
  
 ;;given tests
 ;; basic given with one binding
-(check-equal? (top-interp '{given {[x = 5]} do x} 100) "5")
+(check-equal? (top-interp '{given {[x = 5]} do x}) "5")
 ;; given with multiple bindings
-(check-equal? (top-interp '{given {[z = {+ 9 14}] [y = 98]} do {+ z y}} 100) "121")
+(check-equal? (top-interp '{given {[z = {+ 9 14}] [y = 98]} do {+ z y}}) "121")
 ;; given desugars correctly - rhs is evaluated in outer env not inner
 (check-equal? (top-interp '{given {[x = 10]}
                                   do
                                   {given {[x = 1] [y = x]}
-                                         do y}} 100)
+                                         do y}})
               "10")
 ;; given with shadowing - closure captures outer x=10 even when x is later rebound
 (check-equal? (top-interp '{given {[x = 10]}
@@ -606,7 +695,7 @@
                                          do
                                          {given {[x = 100]}
                                                 do
-                                                {f 1}}}} 100)
+                                                {f 1}}}})
               "11")
  
 ;; parse-given-binding - valid binding
@@ -633,12 +722,12 @@
            (lambda () (parse '{given {[x = 1]}  x}))) 
 ;; given - unbound in rhs (rhs evaluated in outer env, x not yet bound)
 (check-exn #rx"VEBG-interp-lookup: name not found"
-           (lambda () (top-interp '{given {[x = 1] [y = x]} do y} 100)))
+           (lambda () (top-interp '{given {[x = 1] [y = x]} do y})))
 ;; parse-given-bindings line 228 - non-list bindings sexp
 (check-exn #rx"VEBG-parse: given must contain a list of bindings, got:"
            (lambda () (parse-given-bindings 42 )))
  
-(check-equal? (top-interp '{equal? 1 "1"} 100) "false")
+(check-equal? (top-interp '{equal? 1 "1"}) "false")
 ;;------ new tests for uncovered lines ------
  
 ;; line 81: top-store sets free pointer to 18 (17 prims pre-loaded at indices 1-17)
@@ -705,3 +794,4 @@
                                    (CloV '() (NumC 2) mt-env)
                                    (CloV '() (NumC 3) mt-env)) sto)
                 (NumV 3)))
+)

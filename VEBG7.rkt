@@ -20,10 +20,10 @@
 (struct TBinding ([id : Symbol] [ty : Type]) #:transparent)
 (define-type TEnv [Listof TBinding])
 (define base-tenv (list
-                   [TBinding '+ (FunT (list (NumT) (NumT)) (NumT))]
-                   [TBinding '* (FunT (list (NumT) (NumT)) (NumT))]
-                   [TBinding '- (FunT (list (NumT) (NumT)) (NumT))]
-                   [TBinding '/ (FunT (list (NumT) (NumT)) (NumT))]))
+                   [TBinding '+ (NumT)]
+                   [TBinding '* (NumT)]
+                   [TBinding '- (NumT)]
+                   [TBinding '/ (NumT)]))
 
 (struct Parameter ([type : Type] [val : Symbol]) #:transparent)
 
@@ -124,7 +124,7 @@
        [other (error 'VEBG-interp "if test did not evaluate to a boolean: ~e" other)])]
     [(LamC (Parameter type params) body) (CloV params body env)]
     [(RebC (idC i) arg) (define a (interp arg env sto))
-                        (vector-set! sto (env-lookup i env) a)
+                        (vector-set! sto (env-lookup i env) a) 
                         (NullV)]     
     [(appC fun args)
      (define f-val (interp fun env sto))
@@ -166,7 +166,7 @@
                        (error 'VEBG-parse "invalid id, got ~e" a)
                        (idC a))]
     [other (error 'VEBG-parse "expected valid syntax, got ~e" other)]))
-
+ 
 ;;takes an Sexp and returns a type
 (define (parse-type [s : Sexp]) : Type
   (match s
@@ -186,7 +186,7 @@
     [(NumC n) (NumT)]
     [(idC i) (ty-lookup i env)]
     [(IfC test thn els)
-     (match (type-check test env)
+     (match (type-check test env) 
        [BoolT (if (equal? (type-check thn env)
                           (type-check els env))
                   BoolT
@@ -194,12 +194,27 @@
        [other (error 'VEBG-type-check "if test did not evaluate to a boolean: ~e" other)])]
     [(LamC (list params ...) body)
      (FunT (map Parameter-type params) (type-check body (extend-tenv params env)))]  
-    [(appC fun args)
+    [(appC fun args) 
      (define f-type (type-check fun env))
-     (define arg-types (map
-                        (lambda ([a : ExprC]) (type-check a env))
-                        args))
-     (FunT arg-types f-type)]))
+    (cond
+       [(FunT? f-type) 
+              (match-Targs (FunT-argT f-type) args env)
+              (FunT-retT f-type)]
+       [else (error 'VEBG-type-check "cannot apply non-function type: ~e" f-type)])]))
+ 
+;;takes a list of parameter types and arguments
+;;returns true if types match, errors otherwise
+(define (match-Targs [paramT : (Listof Type)] [args : (Listof ExprC)] [env : TEnv])
+  : (Listof Type)
+  (match* (paramT args)
+    [('() '()) '()]
+    [((cons f1 r1) (cons f2 r2))
+     (define arg-type (type-check f2 env))
+     (cond
+       [(eq? f1 arg-type) (cons arg-type (match-Targs r1 r2 env))]
+       [else (error 'VEBG-type-check "type mismatch, function expected: ~e, got : ~e" f1 r1)])]
+    [((cons f1 r1) _) (error 'VEBG-interp "input mismatch, missing argument(s): ~e" paramT )]
+    [(_ (cons f2 r2)) (error 'VEBG-interp "input mismatch, too many argument(s): ~e"  args)]))
 
 ;;takes a list of Parameters and type environment,
 ;;converts params to type bindings and extends environment
@@ -410,7 +425,7 @@
     [(list bindings ...)
      (define parsed
        (map (lambda ([b : Sexp]) : GivenBind
-              (parse-given-binding b))
+              (parse-given-binding b)) 
             (cast bindings (Listof Sexp))))
      (if (check-duplicates (map GivenBind-name parsed))
          (error 'VEBG-parse "duplicate given binding name: ~e" (map GivenBind-name parsed))
@@ -418,6 +433,9 @@
     [other (error 'VEBG-parse "given must contain a list of bindings, got: ~e" other)]))
 
 ;;----end helper functions for parse-------------------------------
+(check-equal? (type-check (parse '{fn ([num : x] [str : y]) -> {+ 1 x}}) base-tenv)
+                (FunT (list (NumT) (NumT)) (NumT)))
+
 #;(
 (define while
   '{given ([while = "placeholder"])
@@ -461,7 +479,7 @@
                                        {* n {fact {- n 1}}}}}])
                   do
                   {chain {fact := f}
-                         {fact 6}}}}) "720")
+                         {fact 6}}}}) "720") 
  
 (check-exn #rx"VEBG-aref: index must be an integer: 2.3" (lambda () 
            (top-interp '(given ((f = (make-array 5 false))) do (aset! f 2.3 19)))))
