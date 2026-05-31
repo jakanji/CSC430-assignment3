@@ -2,7 +2,7 @@
 
 (require typed/rackunit)
 
-(define-type ExprC (U NumC idC StrC LamC IfC appC RebC ChainC RecC))
+(define-type ExprC (U NumC idC StrC LamC IfC appC RebC))
 (struct StrC ([s : String ]) #:transparent)
 (struct NumC ([n : Real]) #:transparent)
 (struct idC ([s : Symbol]) #:transparent)
@@ -10,8 +10,6 @@
 (struct appC ([fun : ExprC] [arg : (Listof ExprC)]) #:transparent)
 (struct RebC ([id : ExprC] [arg : ExprC]) #:transparent)
 (struct LamC ([arg : (Listof Symbol)] [body : ExprC]) #:transparent)
-(struct ChainC ([exprs : (Listof ExprC)]) #:transparent)
-(struct RecC ([name : Symbol] [rhs : ExprC] [body : ExprC]) #:transparent)
 
 (define-type Type (U Number Boolean String IfT funT))
 (struct IfT ([tst : Type] [thn : Type] [els : Type]) #:transparent)
@@ -29,8 +27,8 @@
 (struct StrV ([s : String]) #:transparent)
 (struct CloV ([params : (Listof Symbol)] [body : ExprC] [env : Env]) #:transparent)
 (struct ArrayV ([start : Integer] [size : Natural]) #:transparent)
-
 (struct GivenBind ([name : Symbol] [rhs : ExprC]) #:transparent)
+
 (struct Binding ([name : Symbol] [val : Integer]) #:transparent)
 (define-type Env [Listof Binding])
 (define top-env (list
@@ -119,9 +117,7 @@
     [(LamC params body) (CloV params body env)]
     [(RebC (idC i) arg) (define a (interp arg env sto))
                         (vector-set! sto (env-lookup i env) a)
-                        (NullV)]
-    [(ChainC exprs)
-     (interp-chain exprs env sto)]
+                        (NullV)]     
     [(appC fun args)
      (define f-val (interp fun env sto))
      (define evaluated-args (map
@@ -149,33 +145,19 @@
            (map GivenBind-rhs parsed-bindings))]
     [(list 'given bad-parts ...)
      (error 'VEBG-parse "given must look like {given {[id = expr] ...} do expr}, got: ~e" prog)]
-    [(list 'chain first rest ...)
-     (ChainC (map parse (cons first rest)))]
-    [(list 'rec-given (list (list (? symbol? name) '= rhs)) 'do body)
-     (cond
-       [(not (LamC? (parse rhs)))
-        (error 'VEBG-parse "rec-given rhs must be a function, got: ~e" rhs)]
-       [(reserved-id? name)
-        (error 'VEBG-parse "reserved word used as rec-given name: ~e" name)]
-       [else
-        (RecC name (parse rhs) (parse body))])]
     [(list fun args ...)  
      (appC (parse fun) (map parse args))]    
-    [(? symbol? a)
-     (if (reserved-id? a)
-         (error 'VEBG-parse "invalid id, got ~e" a)
-         (idC a))]
+    [(? symbol? a) (if (or [equal? a '->]
+                           [equal? a 'if] 
+                           [equal? a 'fn]
+                           [equal? a 'given]
+                           [equal? a '=]
+                           [equal? a 'do]
+                           [equal? a ':=]
+                           [equal? a ':])
+                       (error 'VEBG-parse "invalid id, got ~e" a)
+                       (idC a))]
     [other (error 'VEBG-parse "expected valid syntax, got ~e" other)]))
-
-;; calls interp on chained expressions
-(: interp-chain ((Listof ExprC) Env Store -> Value))
-(define (interp-chain exprs env sto)
-  (match exprs
-    ['() (error 'VEBG-interp "empty chain")]
-    [(list last-expr) (interp last-expr env sto)]
-    [(cons first-expr rest-exprs)
-     (interp first-expr env sto)
-     (interp-chain rest-exprs env sto)]))
 
 ;;takes an Sexp and returns a type
 (define (parse-type [s : Sexp]) : Type
@@ -395,10 +377,6 @@
          (error 'VEBG-parse "duplicate given binding name: ~e" (map GivenBind-name parsed))
          parsed)]
     [other (error 'VEBG-parse "given must contain a list of bindings, got: ~e" other)]))
-
-;; checks if the passed symbol is a reserved word
-(define (reserved-id? a)
-  (member a '(-> if fn given = do := : rec-given chain)))
 
 ;;----end helper functions for parse-------------------------------
 #;(
@@ -672,18 +650,6 @@
                                                 do
                                                 {f 1}}}})
               "11")
-
-;; rec-given tests
-;; simple
-(check-equal?
- (top-interp
-  '{rec-given {[fact = {fn (n) ->
-                         {if {<= n 0}
-                             1
-                             {* n {fact {- n 1}}}}}]}
-              do
-              {fact 6}})
- "720")
  
 ;; parse-given-binding - valid binding
 (check-equal? (parse-given-binding '[x = 10])
