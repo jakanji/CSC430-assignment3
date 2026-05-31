@@ -8,6 +8,7 @@
 (struct idC ([s : Symbol]) #:transparent)
 (struct IfC ([test : ExprC] [thn : ExprC] [els : ExprC]) #:transparent)
 (struct appC ([fun : ExprC] [arg : (Listof ExprC)]) #:transparent)
+
 (struct Binding ([name : Symbol] [val : Value]) #:transparent)
 (define-type Env [Listof Binding])
 
@@ -18,6 +19,7 @@
 (struct PrimV ([val : Symbol]) #:transparent)
 (struct StrV ([s : String]) #:transparent)
 (struct CloV ([params : (Listof Symbol)] [body : ExprC] [env : Env]) #:transparent)
+
 (struct GivenBind ([name : Symbol] [rhs : ExprC]) #:transparent)
 (define top-env (list
                  (Binding 'true (BoolV true))
