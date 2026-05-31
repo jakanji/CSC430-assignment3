@@ -150,9 +150,11 @@
     [(list first ':= snd)  
       (RebC (parse first) (parse snd))]
     [(list 'fn (list params ...) '-> body)
-     (if (check-duplicates params)
-         (error 'VEBG-parse "function cannot have duplicate parameters: ~e" params)
-         (LamC (parse-params params) (parse body)))]
+     (define parsed-params (parse-params params))
+     (if (check-duplicates (map ParamC-name parsed-params))
+         (error 'VEBG-parse "function cannot have duplicate parameters: ~e"
+                (map ParamC-name parsed-params))
+         (LamC parsed-params (parse body)))]
     [(list 'given bindings 'do body)
      (define parsed-bindings (parse-given-bindings bindings))
      (appC (LamC (map GivenBind-name parsed-bindings) (parse body))
@@ -375,12 +377,20 @@
 
 ;;-----helper functions for parse----------------------------------
 
-;;takes an Sexp and returns a list of symbols
-(define (parse-params [params : Sexp]) : (Listof Symbol)
+;;takes an Sexp and returns a list of ParamC
+(: parse-params (Sexp -> (Listof ParamC)))
+(define (parse-params [params : Sexp]) : (Listof ParamC)
   (match params
     ['() '()]
-    [(cons (? symbol? f) r) (cons f (parse-params r))]
-    [other (error 'VEBG-parse "params must be a list of symbols: ~e" other)]))
+    [(cons (list ty (? symbol? name)) rst)
+     (cond
+       [(reserved-id? name)
+        (error 'VEBG-parse "reserved word used as parameter name: ~e" name)]
+       [else
+        (cons (ParamC (parse-type ty) name)
+              (parse-params rst))])]
+    [other
+     (error 'VEBG-parse "params must look like ([type id] ...), got: ~e" other)]))
 
 ;;-----helper functions for given/parse-------------------------------
 
