@@ -188,14 +188,16 @@
      (interp-chain rest-exprs env sto)]))
 
 ;;takes an Sexp and returns a type
+(: parse-type (Sexp -> Type))
 (define (parse-type [s : Sexp]) : Type
   (match s
-    [(? number? n) n]
-    [(? boolean? b) b]
-    [(? string? s) s]
-    [(list 'if tst thn els) (IfT (parse-type tst)(parse-type thn)(parse-type els))]
-    [(list 'fn (list params ...) ret) (funT (map parse-type params)
-                                 (parse-type ret))]))
+    ['num (NumT)]
+    ['bool (BoolT)]
+    ['str (StrT)]
+    [(list args ... '-> ret)
+     (funT (map parse-type (cast args (Listof Sexp)))
+           (parse-type ret))]
+    [other (error 'VEBG-parse-type "invalid type syntax: ~e" other)]))
 
 ;;takes a type and type environment
 ;;returns a type if type is correct
@@ -861,3 +863,16 @@
                                    (CloV '() (NumC 3) mt-env)) sto)
                 (NumV 3)))
 )
+
+
+
+
+
+
+
+;; -- parse-type tests
+(check-equal? (parse-type 'num) (NumT))
+(check-equal? (parse-type 'bool) (BoolT))
+(check-equal? (parse-type 'str) (StrT))
+(check-equal? (parse-type '{num str -> bool})
+              (funT (list (NumT) (StrT)) (BoolT)))
