@@ -346,9 +346,7 @@
        [(StrV s) (NumV (string-length s))]
        [_ (error 'VEBG-strlen "input must be a string: ~e" str)])]
     [('error (list v))
-     (error 'VEBG-error "user-error: ~e" (serialize v))]
-    [('chain progs)
-     (chain-progs progs store)]
+     (error 'VEBG-error "user-error: ~e" (serialize v))]    
     [('make-array (list (NumV size) val))
      (cond
        [(< size 1) (error 'VEBG "cannot create array size <1: ~e" size)]
@@ -380,17 +378,6 @@
              
     [(_ _) (error 'VEBG-binop "invalid binary operation: ~e ~e"
                   op args)]))
-
-;;takes a list of expressions, evaluates each, and returns value of the last one
-;;([params : (Listof Symbol)] [body : ExprC] [env : Env])
-(define (chain-progs [progs : (Listof Value)] [store : Store]) : Value
-  (match progs
-    [(cons (CloV params body env) '()) 
-     (interp body (match-args params '() env store) store)]
-    [(cons (CloV params body env) rst)
-     (interp body (match-args params '() env store) store)
-     (chain-progs rst store)]
-    [(list vals ...) (last vals)]))
 
 ;;takes a string, a starting number, and ending number and returns a substring
 ;;of the string from the start to stop
