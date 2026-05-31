@@ -99,7 +99,9 @@
 ;;takes an s-expression and calles parser and interp
 (: top-interp (Sexp -> String))
 (define (top-interp fun-sexps)
-  (serialize (interp (parse fun-sexps) top-env (top-store 2000))))
+  (define parsed (parse fun-sexps))
+  (type-check parsed base-tenv)
+  (serialize (interp parsed top-env (top-store 2000))))
  
 ;;accepts any VEBG4 value and returns a string
 (define (serialize [val : Value]) : String
@@ -257,7 +259,7 @@
      (cond
        [(equal? i name) type]
        [else (ty-lookup i rst)])]))
-
+ 
 ;;---interp helper  functions -------------------------------
 
 ;;takes a store and number of locations
