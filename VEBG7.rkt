@@ -122,6 +122,13 @@
                         (NullV)]
     [(ChainC exprs)
      (interp-chain exprs env sto)]
+    [(RecC name rhs body)
+     (define loc (allocate sto 1))
+     (vector-set! sto loc (StrV "#<VEBG-uninitialized-rec>"))
+     (define rec-env (extend-env (Binding name loc) env))
+     (define rhs-val (interp rhs rec-env sto))
+     (vector-set! sto loc rhs-val)
+     (interp body rec-env sto)]
     [(appC fun args)
      (define f-val (interp fun env sto))
      (define evaluated-args (map
@@ -684,7 +691,76 @@
               do
               {fact 6}})
  "720")
- 
+;; uncategorised top-interp tests--------------
+(check-equal?
+ (top-interp '{chain 1 2 3})
+ "3")
+
+(check-equal?
+ (top-interp '{chain {+ 1 2}
+                     {* 3 4}
+                     {- 20 5}})
+ "15")
+
+(check-equal?
+ (top-interp
+  '{given {[x = 0]}
+          do
+          {chain {x := 10}
+                 x}})
+ "10")
+
+(check-equal?
+ (top-interp
+  '{given {[x = 0]}
+          do
+          {chain {x := {+ x 1}}
+                 {x := {+ x 1}}
+                 {x := {+ x 1}}
+                 x}})
+ "3")
+
+(check-equal?
+ (top-interp
+  '{given {[arr = {array 0}]}
+          do
+          {chain {aset! arr 0 99}
+                 {aref arr 0}}})
+ "99")
+
+;; ---------------- chain helper tests ----------------
+
+(check-exn #rx"VEBG-interp: empty chain"
+           (lambda ()
+             (interp-chain '() top-env (top-store 100))))
+
+(check-equal?
+ (interp-chain (list (NumC 42)) top-env (top-store 100))
+ (NumV 42))
+
+(check-equal?
+ (interp-chain (list (NumC 1)
+                     (NumC 2)
+                     (NumC 3))
+               top-env
+               (top-store 100))
+ (NumV 3))
+;; ----- Chain parse -------
+(check-equal?
+ (parse '{chain 1 2 3})
+ (ChainC (list (NumC 1) (NumC 2) (NumC 3))))
+
+(check-equal?
+ (parse '{chain {+ 1 2} {* 3 4}})
+ (ChainC
+  (list
+   (appC (idC '+) (list (NumC 1) (NumC 2)))
+   (appC (idC '*) (list (NumC 3) (NumC 4))))))
+
+(check-exn #rx"VEBG-parse: invalid id"
+           (lambda () (parse 'chain)))
+
+
 ;; parse-given-binding - valid binding
 (check-equal? (parse-given-binding '[x = 10])
               (GivenBind 'x (NumC 10)))
