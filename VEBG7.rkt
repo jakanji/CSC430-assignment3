@@ -25,7 +25,9 @@
                    [TBinding '+ (FunT (list (NumT) (NumT)) (NumT))]
                    [TBinding '* (FunT (list (NumT) (NumT)) (NumT))]
                    [TBinding '- (FunT (list (NumT) (NumT)) (NumT))]
-                   [TBinding '/ (FunT (list (NumT) (NumT)) (NumT))]))
+                   [TBinding '/ (FunT (list (NumT) (NumT)) (NumT))]
+                   [TBinding '<= (FunT (list (NumT) (NumT)) (BoolT))]
+                   [TBinding 'num-eq? (FunT (list (NumT) (NumT)) (BoolT))]))
  
 (struct Parameter ([type : Type] [val : Symbol]) #:transparent)
 
@@ -113,7 +115,7 @@
     [(CloV _ _ _) "#<procedure>"]
     [(ArrayV _ _) "#<array>"]
     [(NullV) "null"]))
-
+ 
 ;;interpretation evaluation for VEBG language
 (define (interp [a : ExprC] [env : Env] [sto : Store]) : Value
   (match a
@@ -125,7 +127,7 @@
        [(BoolV #t) (interp thn env sto)]
        [(BoolV #f) (interp else env sto)]
        [other (error 'VEBG-interp "if test did not evaluate to a boolean: ~e" other)])]
-    [(LamC (Parameter type params) body) (CloV params body env)]
+    [(LamC (list (Parameter type params) ...) body) (CloV (cast params (Listof Symbol)) body env)]
     [(RebC (idC i) arg) (define a (interp arg env sto))
                         (vector-set! sto (env-lookup i env) a)
                         (NullV)]
@@ -454,6 +456,10 @@
 (check-equal? (type-check (parse '{fn ([num : x] [str : y]) -> {+ 1 x}}) base-tenv)
                 (FunT (list (NumT) (StrT)) (NumT)))
 
+(check-equal? (top-interp '{fn ([str : x] [num : y]) -> {+ y 0}}) "#<procedure>")
+(check-exn #rx"VEBG-type-check: type mismatch, function expected: "
+           (lambda () (top-interp '{fn ([str : x] [num : y]) -> {+ x 0}})))
+
 #;(
 (define while
   '{given ([while = "placeholder"])
@@ -484,6 +490,8 @@
                              do {in-order (array 1 2 3) 3}}}) "true")
 
 ;;---------------------tests-------------------------------------------- --------------------------------
+
+
 
 (check-equal? (Param->TBind (list (Parameter (NumT) 'x) (Parameter (StrT) 'y)))
               (list (TBinding 'x (NumT)) (TBinding 'y (StrT))))
