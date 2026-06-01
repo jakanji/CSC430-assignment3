@@ -12,7 +12,7 @@
 (struct ParamC ([ty : Type] [name : Symbol]) #:transparent)             ;; added for types association
 (struct LamC ([arg : (Listof ParamC)] [body : ExprC]) #:transparent)     ;; changed to paramC from symbol
 (struct ChainC ([exprs : (Listof ExprC)]) #:transparent)
-(struct RecC ([name : Symbol] [rhs : ExprC] [body : ExprC]) #:transparent)
+(struct RecC ([ty : Type] [name : Symbol] [rhs : ExprC] [body : ExprC]) #:transparent)
 
 (define-type Type (U NumT BoolT StrT funT))
 (struct NumT () #:transparent)
@@ -35,6 +35,9 @@
    (TBinding 'str-eq? (funT (list (StrT) (StrT)) (BoolT)))
    (TBinding 'substring (funT (list (StrT) (NumT) (NumT)) (StrT)))
    (TBinding 'strlen (funT (list (StrT)) (NumT)))))
+(: extend-tenv (TBinding TEnv -> TEnv))
+(define (extend-tenv b env)
+  (cons b env))
 
 (define-type Value (U NumV BoolV PrimV StrV CloV ArrayV NullV))
 (struct NullV () #:transparent)
@@ -45,7 +48,7 @@
 (struct CloV ([params : (Listof ParamC)] [body : ExprC] [env : Env]) #:transparent)  ;; changed to paramC from symbol
 (struct ArrayV ([start : Integer] [size : Natural]) #:transparent)
 
-(struct GivenBind ([name : Symbol] [rhs : ExprC]) #:transparent)
+(struct GivenBind ([ty : Type] [name : Symbol] [rhs : ExprC]) #:transparent)
 (struct Binding ([name : Symbol] [val : Integer]) #:transparent)
 (define-type Env [Listof Binding])
 (define top-env (list
@@ -138,7 +141,7 @@
                         (NullV)]
     [(ChainC exprs)
      (interp-chain exprs env sto)]
-    [(RecC name rhs body)
+    [(RecC _ name rhs body)
      (define loc (allocate sto 1))
      (vector-set! sto loc (StrV "#<VEBG-uninitialized-rec>"))
      (define rec-env (extend-env (Binding name loc) env))
@@ -170,20 +173,25 @@
          (LamC parsed-params (parse body)))]
     [(list 'given bindings 'do body)
      (define parsed-bindings (parse-given-bindings bindings))
-     (appC (LamC (map GivenBind-name parsed-bindings) (parse body))
-           (map GivenBind-rhs parsed-bindings))]
+     (appC (LamC (map (lambda ([b : GivenBind]) : ParamC
+              (ParamC (GivenBind-ty b) (GivenBind-name b)))
+            parsed-bindings)
+       (parse body))
+      (map GivenBind-rhs parsed-bindings))]
     [(list 'given bad-parts ...)
      (error 'VEBG-parse "given must look like {given {[id = expr] ...} do expr}, got: ~e" prog)]
     [(list 'chain first rest ...)
      (ChainC (map parse (cons first rest)))]
-    [(list 'rec-given (list (list (? symbol? name) '= rhs)) 'do body)
+    [(list 'rec-given (list (list ty (? symbol? name) '= rhs)) 'do body)
      (cond
-       [(not (LamC? (parse rhs)))
-        (error 'VEBG-parse "rec-given rhs must be a function, got: ~e" rhs)]
        [(reserved-id? name)
         (error 'VEBG-parse "reserved word used as rec-given name: ~e" name)]
        [else
-        (RecC name (parse rhs) (parse body))])]
+        (RecC (parse-type ty) name (parse rhs) (parse body))])]
+    [(list 'rec-given bad-parts ...)
+     (error 'VEBG-parse
+            "rec-given must look like {rec-given {[type id = expr]} do expr}, got: ~e"
+            prog)]
     [(list fun args ...)  
      (appC (parse fun) (map parse args))]    
     [(? symbol? a)
@@ -274,8 +282,17 @@
                 "assignment type mismatch for ~e, expected ~e but got ~e"
                 name old-type new-type))]
 
-    [(RecC name rhs body)
-     (error 'VEBG-type-check "rec-given type-check not implemented yet: ~e" expr)]))
+    [(RecC declared-ty name rhs body)
+     (define rec-env
+       (extend-tenv (TBinding name declared-ty) env))
+     (define rhs-ty (type-check rhs rec-env))
+     (cond
+       [(not (equal? rhs-ty declared-ty))
+        (error 'VEBG-type-check
+               "rec-given rhs type mismatch for ~e, expected ~e but got ~e"
+               name declared-ty rhs-ty)]
+       [else
+        (type-check body rec-env)])]))
 
 ;; takes list of chained Listof ExrC and TEnv, and type-checks them
 ;; return the type of last in the chain
@@ -469,15 +486,19 @@
 ;;-----helper functions for given/parse-------------------------------
 
 ;;parses a single [id = expr] binding
+(: parse-given-binding (Sexp -> GivenBind))
 (define (parse-given-binding [b : Sexp]) : GivenBind
   (match b 
-    [(list (? symbol? name) '= rhs)
+    [(list ty (? symbol? name) '= rhs)
      (cond
-       [(or (equal? name '->) (equal? name 'if) (equal? name 'fn)
-            (equal? name 'given) (equal? name '=) (equal? name 'do) (equal? name ':=))
+       [(reserved-id? name)
         (error 'VEBG-parse "reserved word used as given binding name: ~e" name)]
-       [else (GivenBind name (parse rhs))])]
-    [other (error 'VEBG-parse "given binding must look like [id = expr], got: ~e" other)]))
+       [else
+        (GivenBind (parse-type ty) name (parse rhs))])]
+    [other
+     (error 'VEBG-parse
+            "given binding must look like [type id = expr], got: ~e"
+            other)]))
  
 ;;parses a list of given bindings, checks for duplicates
 (define (parse-given-bindings [raw : Sexp]) : (Listof GivenBind)
@@ -960,3 +981,53 @@
 (check-equal? (parse-type 'str) (StrT))
 (check-equal? (parse-type '{num str -> bool})
               (funT (list (NumT) (StrT)) (BoolT)))
+
+;; ---- rec given tests ----
+(check-equal?
+ (parse '{rec-given {[{num -> num} fact =
+                      {fn ([num n]) ->
+                        {if {<= n 0}
+                            1
+                            {* n {fact {- n 1}}}}}]}
+                    do
+                    {fact 5}})
+ (RecC
+  (funT (list (NumT)) (NumT))
+  'fact
+  (LamC
+   (list (ParamC (NumT) 'n))
+   (IfC
+    (appC (idC '<=) (list (NumC 0) (NumC 0))) ; don’t use this exact expected unless you want to build full AST carefully
+    ...))
+  ...))
+
+;; type checking for rec given
+(check-equal?
+ (type-check
+  (parse '{rec-given {[{num -> num} f =
+                       {fn ([num x]) -> x}]}
+                     do
+                     {f 10}})
+  base-tenv)
+ (NumT))
+
+(check-exn
+ #rx"VEBG-type-check: rec-given rhs type mismatch"
+ (lambda ()
+   (type-check
+    (parse '{rec-given {[{num -> num} f =
+                         {fn ([num x]) -> "bad"}]}
+                       do
+                       {f 10}})
+    base-tenv)))
+
+(check-equal?
+ (top-interp
+  '{rec-given {[{num -> num} fact =
+                {fn ([num n]) ->
+                  {if {<= n 0}
+                      1
+                      {* n {fact {- n 1}}}}}]}
+              do
+              {fact 5}})
+ "120")
