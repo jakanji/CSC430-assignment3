@@ -201,20 +201,80 @@
            (parse-type ret))]
     [other (error 'VEBG-parse-type "invalid type syntax: ~e" other)]))
 
-;;takes a type and type environment
-;;returns a type if type is correct
+;;takes a ExprC and type environment
+;;returns the Type
 ;;errors otherwise
-(define (type-check [t : Type] [env : TEnv]) : Type
-  (match t
-    [(? number? n) n]
-    [(? symbol? s) (ty-lookup s env)]
-    [(IfT tst thn els) (if (boolean? tst)
-                           (if (equal? thn els)
-                               thn
-                               (error 'VEBG-type-mismatch
-                                      "if cases must have same type: ~e ~e" thn els))
-                           (error 'VEBG-type-mismatch
-                                  "test type must be boolean: ~e" tst))]))
+(: type-check (ExprC TEnv -> Type))
+(define (type-check [expr : ExprC] [env : TEnv]) : Type
+  (match expr
+    [(NumC n) (NumT)]
+    [(StrC s) (StrT)]
+    [(idC s) (ty-lookup s env)]
+
+    [(IfC tst thn els)
+     (define tst-type (type-check tst env))
+     (define thn-type (type-check thn env))
+     (define els-type (type-check els env))
+     (cond
+       [(not (equal? tst-type (BoolT)))
+        (error 'VEBG-type-check "if test must have type bool, got: ~e" tst-type)]
+       [(not (equal? thn-type els-type))
+        (error 'VEBG-type-check "if branches must have same type, got: ~e and ~e"
+               thn-type els-type)]
+       [else thn-type])]
+
+    [(LamC params body)
+     (define new-TEnv
+       (append
+        (map (lambda ([p : ParamC]) : TBinding
+               (TBinding (ParamC-name p) (ParamC-ty p)))
+             params)
+        env))
+     (funT (map ParamC-ty params)
+           (type-check body new-TEnv))]
+
+    [(appC fun args)
+     (define fun-type (type-check fun env))
+     (match fun-type
+       [(funT expected-arg-types ret-type)
+        (define actual-arg-types
+          (map (lambda ([a : ExprC]) : Type
+                 (type-check a env))
+               args))
+        (if (equal? expected-arg-types actual-arg-types)
+            ret-type
+            (error 'VEBG-type-check
+                   "function argument type mismatch, expected ~e but got ~e"
+                   expected-arg-types actual-arg-types))]
+       [other
+        (error 'VEBG-type-check "cannot apply non-function type: ~e" other)])]
+
+    [(ChainC exprs)
+     (type-check-chain exprs env)]
+
+    [(RebC (idC name) rhs)
+     (define old-type (ty-lookup name env))
+     (define new-type (type-check rhs env))
+     (if (equal? old-type new-type)
+         old-type
+         (error 'VEBG-type-check
+                "assignment type mismatch for ~e, expected ~e but got ~e"
+                name old-type new-type))]
+
+    [(RecC name rhs body)
+     (error 'VEBG-type-check "rec-given type-check not implemented yet: ~e" expr)]))
+
+;; takes list of chained Listof ExrC and TEnv, and type-checks them
+;; return the type of last in the chain
+(: type-check-chain ((Listof ExprC) TEnv -> Type))
+(define (type-check-chain [exprs : (Listof ExprC)] [env : TEnv]) : Type
+  (match exprs
+    ['() (error 'VEBG-type-check "empty chain")]
+    [(list last-expr) (type-check last-expr env)]
+    [(cons first-expr rest-exprs)
+     (type-check first-expr env)
+     (type-check-chain rest-exprs env)]))
+
 
 ;;takes a type and an environment
 ;;looks up the type in the env and returns type
