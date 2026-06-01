@@ -22,7 +22,19 @@
 
 (struct TBinding ([id : Symbol] [ty : Type]) #:transparent)
 (define-type TEnv [Listof TBinding])
-(define base-tenv '())
+(define base-tenv
+  (list
+   (TBinding 'true (BoolT))
+   (TBinding 'false (BoolT))
+   (TBinding '+ (funT (list (NumT) (NumT)) (NumT)))
+   (TBinding '- (funT (list (NumT) (NumT)) (NumT)))
+   (TBinding '* (funT (list (NumT) (NumT)) (NumT)))
+   (TBinding '/ (funT (list (NumT) (NumT)) (NumT)))
+   (TBinding '<= (funT (list (NumT) (NumT)) (BoolT)))
+   (TBinding 'num-eq? (funT (list (NumT) (NumT)) (BoolT)))
+   (TBinding 'str-eq? (funT (list (StrT) (StrT)) (BoolT)))
+   (TBinding 'substring (funT (list (StrT) (NumT) (NumT)) (StrT)))
+   (TBinding 'strlen (funT (list (StrT)) (NumT)))))
 
 (define-type Value (U NumV BoolV PrimV StrV CloV ArrayV NullV))
 (struct NullV () #:transparent)
@@ -93,9 +105,10 @@
   sto)
        
 ;;takes an s-expression and calles parser and interp
-(: top-interp (Sexp -> String))
-(define (top-interp fun-sexps)
-  (serialize (interp (parse fun-sexps) top-env (top-store 2000))))
+(define (top-interp fun-sexps) : String
+  (define parsed (parse fun-sexps))
+  (type-check parsed base-tenv)
+  (serialize (interp parsed top-env (top-store 2000))))
  
 ;;accepts any VEBG4 value and returns a string
 (define (serialize [val : Value]) : String
@@ -278,13 +291,14 @@
 
 ;;takes a type and an environment
 ;;looks up the type in the env and returns type
-(define (ty-lookup [t : Type] [env : TEnv]) : Type
+(: ty-lookup (Symbol TEnv -> Type))
+(define (ty-lookup [query : Symbol] [env : TEnv]) : Type
   (match env
-    ['() (error 'VEVG-type-check "type not found: ~e" t)]
+    ['() (error 'VEBG-type-check "type not found: ~e" query)]
     [(cons (TBinding name type) rst)
      (cond
-       [(equal? t name) type]
-       [else (ty-lookup t rst)])]))
+       [(equal? query name) type]
+       [else (ty-lookup query rst)])]))
 
 ;;---interp helper  functions -------------------------------
 
