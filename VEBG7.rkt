@@ -59,10 +59,10 @@
                  (Binding '* 5)
                  (Binding '/ 6)
                  (Binding '<= 7)
-                 (Binding 'equal? 8)
-                 (Binding 'substring 9)
-                 (Binding 'strlen 10)
-                 (Binding 'error 11)
+                 (Binding 'num-eq? 8)
+                 (Binding 'str-eq? 9)
+                 (Binding 'substring 10)
+                 (Binding 'strlen 11)
                  (Binding 'chain 12)
                  (Binding 'make-array 13)
                  (Binding 'array 14)
@@ -90,10 +90,10 @@
           (PrimV '*)
           (PrimV '/)
           (PrimV '<=)
-          (PrimV 'equal?)
+          (PrimV 'num-eq?)
+          (PrimV 'str-eq?)
           (PrimV 'substring)
           (PrimV 'strlen)
-          (PrimV 'error)
           (PrimV 'chain)
           (PrimV 'make-array)
           (PrimV 'array)
@@ -389,13 +389,10 @@
          (NumV (/ x y)))]
     [('<= (list (NumV x) (NumV y)))
      (BoolV (<= x y))]
-    [('equal? (list x y)) (match* (x y)
-                            [((NumV x) (NumV y)) (BoolV (= x y))]
-                            [((StrV x) (StrV y)) (BoolV (equal? x y))]
-                            [((BoolV x) (BoolV y)) (BoolV (equal? x y))]
-                            [((ArrayV s1 v1) (ArrayV s2 v2)) (BoolV (equal? s1 s2))]
-                            [(NullV NullV) (BoolV #t)]
-                            [(_ _) (BoolV #f)])]
+    [('num-eq? (list (NumV x) (NumV y)))
+     (BoolV (= x y))]
+    [('str-eq? (list (StrV x) (StrV y)))
+     (BoolV (equal? x y))]
     [('substring (list str (NumV start) (NumV stop)))
      (match str 
        [(StrV s) (apply-substring s start stop)]
@@ -984,22 +981,15 @@
 
 ;; ---- rec given tests ----
 (check-equal?
- (parse '{rec-given {[{num -> num} fact =
-                      {fn ([num n]) ->
-                        {if {<= n 0}
-                            1
-                            {* n {fact {- n 1}}}}}]}
-                    do
-                    {fact 5}})
- (RecC
-  (funT (list (NumT)) (NumT))
-  'fact
-  (LamC
-   (list (ParamC (NumT) 'n))
-   (IfC
-    (appC (idC '<=) (list (NumC 0) (NumC 0))) ; don’t use this exact expected unless you want to build full AST carefully
-    ...))
-  ...))
+ (RecC?
+  (parse '{rec-given {[{num -> num} fact =
+                       {fn ([num n]) ->
+                         {if {<= n 0}
+                             1
+                             {* n {fact {- n 1}}}}}]}
+                     do
+                     {fact 5}}))
+ #t)
 
 ;; type checking for rec given
 (check-equal?
